@@ -1,0 +1,92 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Transaction {
+  id              String           @id @default(uuid()) @db.Uuid
+  amount          Decimal          @db.Decimal(19, 4)
+  currency        String           @db.VarChar(3)
+  customerId      String           @db.VarChar(255)
+  status          TransactionStatus @default(PENDING)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  paymentAttempts PaymentAttempt[]
+  recoveryActions RecoveryAction[]
+
+  @@index([customerId])
+}
+
+model PaymentAttempt {
+  id              String        @id @default(uuid()) @db.Uuid
+  transactionId   String        @db.Uuid
+  paymentMethod   PaymentMethod
+  status          AttemptStatus
+  failureCategory FailureCategory?
+  failureReason   String?
+  attemptNumber   Int
+  createdAt       DateTime      @default(now())
+  transaction     Transaction   @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  recoveryAction  RecoveryAction?
+
+  @@index([transactionId])
+  @@unique([transactionId, attemptNumber])
+}
+
+model RecoveryAction {
+  id            String               @id @default(uuid()) @db.Uuid
+  transactionId String               @db.Uuid
+  attemptId     String               @db.Uuid
+  actionType    RecoveryActionType
+  reason        String
+  status        RecoveryActionStatus @default(RECOMMENDED)
+  createdAt     DateTime             @default(now())
+  transaction   Transaction          @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  attempt       PaymentAttempt       @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId])
+  @@unique([attemptId])
+}
+
+enum TransactionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  RECOVERED
+}
+
+enum PaymentMethod {
+  UPI
+  CARD
+  NET_BANKING
+}
+
+enum AttemptStatus {
+  SUCCESS
+  FAILED
+}
+
+enum FailureCategory {
+  TEMPORARY_FAILURE
+  PAYMENT_METHOD_FAILURE
+  CUSTOMER_ACTION_REQUIRED
+  UNKNOWN_FAILURE
+}
+
+enum RecoveryActionType {
+  RETRY
+  ALTERNATE_METHOD
+  CUSTOMER_ACTION
+  ESCALATE
+}
+
+enum RecoveryActionStatus {
+  RECOMMENDED
+  EXECUTED
+  SUCCESS
+  FAILED
+}
