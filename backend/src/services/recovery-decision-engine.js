@@ -1,5 +1,3 @@
-
-
 import { FailureCategory } from '../enums/failure-category.js';
 import { RecoveryActionType } from '../enums/recovery-action.js';
 

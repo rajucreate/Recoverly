@@ -1,0 +1,9 @@
+{
+  "feature_pipeline_version": "1.0.0",
+  "feature_schema_version": "6.3.1",
+  "source_dataset": "recovery_dataset_v1.csv",
+  "row_count": 6000,
+  "feature_column_count": 19,
+  "feature_file_name": "recovery_features_v1.csv",
+  "feature_schema_file_name": "recovery_features_v1.schema.json"
+}

@@ -1,0 +1,16 @@
+{
+  "dataset_version": "v1",
+  "generator_version": "1.0.0",
+  "random_seed": 42,
+  "generated_at": "2026-08-28T09:04:02.070Z",
+  "source_specification_version": "6.2.1",
+  "dataset_file_name": "recovery_dataset_v1.csv",
+  "row_count": 6000,
+  "schema_version": "6.2.1",
+  "configuration": {
+    "seed": 42,
+    "rowCount": 6000,
+    "startTimestamp": "2025-01-01T00:00:00.000Z"
+  },
+  "dataset_sha256": "771c1f4b523481c7817cc217d0b09802ea8bb211018cf3495bd7f323bb56ed82"
+}

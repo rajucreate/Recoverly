@@ -1,0 +1,209 @@
+{
+  "split_version": "1.0.0",
+  "source_dataset_version": "v1",
+  "source_feature_pipeline_version": "1.0.0",
+  "proportions": {
+    "train": 0.6,
+    "validation": 0.2,
+    "test": 0.2
+  },
+  "generated_at": "2026-08-28T09:04:03.225Z",
+  "random_seed": null,
+  "splits": {
+    "train": {
+      "row_count": 3600,
+      "start_timestamp": "2025-01-01T00:28:06.810Z",
+      "end_timestamp": "2025-08-13T23:11:37.231Z",
+      "recovery_success": {
+        "0": {
+          "count": 1965,
+          "percentage": 54.58
+        },
+        "1": {
+          "count": 1635,
+          "percentage": 45.42
+        }
+      },
+      "candidate_action": {
+        "ALTERNATE_METHOD": {
+          "count": 1124,
+          "percentage": 31.22
+        },
+        "CUSTOMER_ACTION": {
+          "count": 594,
+          "percentage": 16.5
+        },
+        "ESCALATE": {
+          "count": 768,
+          "percentage": 21.33
+        },
+        "RETRY": {
+          "count": 1114,
+          "percentage": 30.94
+        }
+      },
+      "failure_category": {
+        "CUSTOMER_ACTION_REQUIRED": {
+          "count": 395,
+          "percentage": 10.97
+        },
+        "PAYMENT_METHOD_FAILURE": {
+          "count": 1095,
+          "percentage": 30.42
+        },
+        "TEMPORARY_FAILURE": {
+          "count": 1679,
+          "percentage": 46.64
+        },
+        "UNKNOWN_FAILURE": {
+          "count": 431,
+          "percentage": 11.97
+        }
+      },
+      "payment_method": {
+        "CARD": {
+          "count": 1188,
+          "percentage": 33
+        },
+        "NET_BANKING": {
+          "count": 547,
+          "percentage": 15.19
+        },
+        "UPI": {
+          "count": 1865,
+          "percentage": 51.81
+        }
+      }
+    },
+    "validation": {
+      "row_count": 1200,
+      "start_timestamp": "2025-08-14T00:42:13.923Z",
+      "end_timestamp": "2025-10-27T22:47:03.546Z",
+      "recovery_success": {
+        "0": {
+          "count": 672,
+          "percentage": 56
+        },
+        "1": {
+          "count": 528,
+          "percentage": 44
+        }
+      },
+      "candidate_action": {
+        "ALTERNATE_METHOD": {
+          "count": 355,
+          "percentage": 29.58
+        },
+        "CUSTOMER_ACTION": {
+          "count": 193,
+          "percentage": 16.08
+        },
+        "ESCALATE": {
+          "count": 274,
+          "percentage": 22.83
+        },
+        "RETRY": {
+          "count": 378,
+          "percentage": 31.5
+        }
+      },
+      "failure_category": {
+        "CUSTOMER_ACTION_REQUIRED": {
+          "count": 127,
+          "percentage": 10.58
+        },
+        "PAYMENT_METHOD_FAILURE": {
+          "count": 362,
+          "percentage": 30.17
+        },
+        "TEMPORARY_FAILURE": {
+          "count": 567,
+          "percentage": 47.25
+        },
+        "UNKNOWN_FAILURE": {
+          "count": 144,
+          "percentage": 12
+        }
+      },
+      "payment_method": {
+        "CARD": {
+          "count": 375,
+          "percentage": 31.25
+        },
+        "NET_BANKING": {
+          "count": 198,
+          "percentage": 16.5
+        },
+        "UPI": {
+          "count": 627,
+          "percentage": 52.25
+        }
+      }
+    },
+    "test": {
+      "row_count": 1200,
+      "start_timestamp": "2025-10-28T00:03:10.959Z",
+      "end_timestamp": "2026-01-10T23:06:53.324Z",
+      "recovery_success": {
+        "0": {
+          "count": 654,
+          "percentage": 54.5
+        },
+        "1": {
+          "count": 546,
+          "percentage": 45.5
+        }
+      },
+      "candidate_action": {
+        "ALTERNATE_METHOD": {
+          "count": 354,
+          "percentage": 29.5
+        },
+        "CUSTOMER_ACTION": {
+          "count": 201,
+          "percentage": 16.75
+        },
+        "ESCALATE": {
+          "count": 231,
+          "percentage": 19.25
+        },
+        "RETRY": {
+          "count": 414,
+          "percentage": 34.5
+        }
+      },
+      "failure_category": {
+        "CUSTOMER_ACTION_REQUIRED": {
+          "count": 143,
+          "percentage": 11.92
+        },
+        "PAYMENT_METHOD_FAILURE": {
+          "count": 308,
+          "percentage": 25.67
+        },
+        "TEMPORARY_FAILURE": {
+          "count": 618,
+          "percentage": 51.5
+        },
+        "UNKNOWN_FAILURE": {
+          "count": 131,
+          "percentage": 10.92
+        }
+      },
+      "payment_method": {
+        "CARD": {
+          "count": 444,
+          "percentage": 37
+        },
+        "NET_BANKING": {
+          "count": 133,
+          "percentage": 11.08
+        },
+        "UPI": {
+          "count": 623,
+          "percentage": 51.92
+        }
+      }
+    }
+  }
+}
