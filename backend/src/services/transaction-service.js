@@ -3,11 +3,20 @@ import { BusinessRuleError, NotFoundError } from '../errors/app-error.js';
 import { TransactionStatus } from '../enums/transaction-status.js';
 import { RecoveryDecisionEngine } from './recovery-decision-engine.js';
 import { RecoveryActionRepository } from '../repositories/recovery-action-repository.js';
+import { RecoveryPredictionService } from '../intelligence/recovery-prediction-service.js';
+import { RecoveryDecisionPolicy } from '../intelligence/recovery-decision-policy.js';
 
 export class TransactionService {
-  constructor(transactionRepository, recoveryDecisionEngine = new RecoveryDecisionEngine()) {
+  constructor(
+    transactionRepository,
+    recoveryDecisionEngine = new RecoveryDecisionEngine(),
+    predictionService = new RecoveryPredictionService(),
+    decisionPolicy = new RecoveryDecisionPolicy(predictionService, recoveryDecisionEngine)
+  ) {
     this.transactionRepository = transactionRepository;
     this.recoveryDecisionEngine = recoveryDecisionEngine;
+    this.predictionService = predictionService;
+    this.decisionPolicy = decisionPolicy;
   }
 
   async createTransaction(data) {
@@ -47,14 +56,23 @@ export class TransactionService {
 
       let recoveryAction = null;
       if (data.outcome === 'FAILED') {
-        const decision = this.recoveryDecisionEngine.decide({
-          failureCategory: data.failureCategory,
-          previousTemporaryFailureCount: transaction.paymentAttempts.length
-        });
+        const predictionContext = {
+          transaction_amount: transaction.amount,
+          currency: transaction.currency,
+          payment_method_attempted: data.paymentMethod,
+          failure_category: data.failureCategory,
+          has_failure_reason: !!data.failureReason,
+          attempt_number: transaction._count.paymentAttempts + 1,
+          prior_failed_attempt_count: transaction.failedAttempts?.length ?? 0,
+          prior_temporary_failure_count: transaction.paymentAttempts?.length ?? 0,
+          transaction_status: 'FAILED'
+        };
+
+        const decision = this.decisionPolicy.decide(predictionContext);
         recoveryAction = await new RecoveryActionRepository(repository.prisma).create({
           transactionId,
           attemptId: attempt.id,
-          actionType: decision.actionType,
+          actionType: decision.selected_action,
           reason: decision.reason,
           status: 'RECOMMENDED'
         });

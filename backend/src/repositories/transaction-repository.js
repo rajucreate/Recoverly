@@ -15,9 +15,15 @@ export class TransactionRepository {
       select: {
         id: true,
         status: true,
+        amount: true,
+        currency: true,
         _count: { select: { paymentAttempts: true } },
         paymentAttempts: {
           where: { status: 'FAILED', failureCategory: 'TEMPORARY_FAILURE' },
+          select: { id: true }
+        },
+        failedAttempts: {
+          where: { status: 'FAILED' },
           select: { id: true }
         }
       }

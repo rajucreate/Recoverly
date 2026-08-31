@@ -10,8 +10,8 @@ import { TransactionService } from './services/transaction-service.js';
 import { RecoveryExecutionService } from './services/recovery-execution-service.js';
 import { SimulatedPaymentProvider } from './providers/simulated-payment-provider.js';
 
-export function createApp({ transactionService, recoveryExecutionService } = {}) {
-  const service = transactionService ?? new TransactionService(new TransactionRepository(prisma));
+export function createApp({ transactionService, recoveryExecutionService, predictionService, decisionPolicy } = {}) {
+  const service = transactionService ?? new TransactionService(new TransactionRepository(prisma), undefined, predictionService, decisionPolicy);
   const executionService = recoveryExecutionService ?? new RecoveryExecutionService(new TransactionRepository(prisma), new SimulatedPaymentProvider());
   const app = express();
   app.use(cors({
