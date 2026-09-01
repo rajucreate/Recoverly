@@ -1,0 +1,157 @@
+{
+  "evaluation_version": "6.6.0",
+  "evaluated_at": "2026-09-01T02:57:26.294Z",
+  "dataset_version": "v1",
+  "test_split_version": "1.0.0",
+  "model_version": "phase2-interaction-logistic-v1",
+  "feature_schema_version": "6.3.1",
+  "total_scenarios_evaluated": 1200,
+  "metrics": {
+    "total_evaluated_scenarios": 1200,
+    "primary_metric": "recovery_success_rate",
+    "rule_engine": {
+      "total_scenarios": 1200,
+      "successful_recoveries": 651.94,
+      "failed_recoveries": 548.06,
+      "recovery_success_rate": 0.5433,
+      "action_counts": {
+        "RETRY": 546,
+        "ALTERNATE_METHOD": 308,
+        "CUSTOMER_ACTION": 143,
+        "ESCALATE": 203
+      },
+      "escalation_rate": 0.1692,
+      "retry_success_rate": 0.8576,
+      "alternate_method_success_rate": 0.3787
+    },
+    "ml_policy": {
+      "total_scenarios": 1200,
+      "successful_recoveries": 656.74,
+      "failed_recoveries": 543.26,
+      "recovery_success_rate": 0.5473,
+      "action_counts": {
+        "RETRY": 546,
+        "ALTERNATE_METHOD": 654,
+        "CUSTOMER_ACTION": 0,
+        "ESCALATE": 0
+      },
+      "escalation_rate": 0,
+      "retry_success_rate": 0.8576,
+      "alternate_method_success_rate": 0.2882
+    },
+    "improvement": {
+      "absolute_improvement": 0.004,
+      "absolute_percentage_points": 0.4,
+      "relative_improvement": 0.0074,
+      "relative_percentage": 0.74
+    },
+    "paired_comparison": {
+      "ml_wins": 171,
+      "rule_wins": 83,
+      "ties": 946,
+      "ml_win_rate": 0.1425,
+      "rule_win_rate": 0.0692,
+      "tie_rate": 0.7883
+    },
+    "segments": {
+      "by_failure_category": {
+        "PAYMENT_METHOD_FAILURE": {
+          "scenario_count": 308,
+          "rule_recovery_rate": 0.3787,
+          "ml_recovery_rate": 0.3787,
+          "absolute_difference": 0,
+          "relative_difference": 0
+        },
+        "TEMPORARY_FAILURE": {
+          "scenario_count": 618,
+          "rule_recovery_rate": 0.7743,
+          "ml_recovery_rate": 0.7903,
+          "absolute_difference": 0.016,
+          "relative_difference": 0.0206
+        },
+        "CUSTOMER_ACTION_REQUIRED": {
+          "scenario_count": 143,
+          "rule_recovery_rate": 0.1834,
+          "ml_recovery_rate": 0.1408,
+          "absolute_difference": -0.0427,
+          "relative_difference": -0.2326
+        },
+        "UNKNOWN_FAILURE": {
+          "scenario_count": 131,
+          "rule_recovery_rate": 0.2331,
+          "ml_recovery_rate": 0.2409,
+          "absolute_difference": 0.0078,
+          "relative_difference": 0.0334
+        }
+      },
+      "by_payment_method": {
+        "UPI": {
+          "scenario_count": 623,
+          "rule_recovery_rate": 0.5629,
+          "ml_recovery_rate": 0.5666,
+          "absolute_difference": 0.0038,
+          "relative_difference": 0.0067
+        },
+        "CARD": {
+          "scenario_count": 444,
+          "rule_recovery_rate": 0.5213,
+          "ml_recovery_rate": 0.5255,
+          "absolute_difference": 0.0042,
+          "relative_difference": 0.0081
+        },
+        "NET_BANKING": {
+          "scenario_count": 133,
+          "rule_recovery_rate": 0.525,
+          "ml_recovery_rate": 0.5293,
+          "absolute_difference": 0.0044,
+          "relative_difference": 0.0083
+        }
+      },
+      "by_selected_action": {
+        "RETRY": {
+          "rule_selection_count": 546,
+          "rule_selection_share": 0.455,
+          "rule_success_rate": 0.8576,
+          "ml_selection_count": 546,
+          "ml_selection_share": 0.455,
+          "ml_success_rate": 0.8576
+        },
+        "ALTERNATE_METHOD": {
+          "rule_selection_count": 308,
+          "rule_selection_share": 0.2567,
+          "rule_success_rate": 0.3787,
+          "ml_selection_count": 654,
+          "ml_selection_share": 0.545,
+          "ml_success_rate": 0.2882
+        },
+        "CUSTOMER_ACTION": {
+          "rule_selection_count": 143,
+          "rule_selection_share": 0.1192,
+          "rule_success_rate": 0.1834,
+          "ml_selection_count": 0,
+          "ml_selection_share": 0,
+          "ml_success_rate": 0
+        },
+        "ESCALATE": {
+          "rule_selection_count": 203,
+          "rule_selection_share": 0.1692,
+          "rule_success_rate": 0.2011,
+          "ml_selection_count": 0,
+          "ml_selection_share": 0,
+          "ml_success_rate": 0
+        }
+      }
+    },
+    "matched_historical_replay": {
+      "rule_matched_scenarios": 652,
+      "rule_matched_success_rate": 0.5414,
+      "ml_matched_scenarios": 538,
+      "ml_matched_success_rate": 0.6134
+    }
+  },
+  "limitations": [
+    "Evaluation uses synthetic historical transaction distributions.",
+    "Offline counterfactual simulation; not an online A/B test.",
+    "Unobserved counterfactual outcomes are evaluated via ground-truth data generating distribution."
+  ]
+}
