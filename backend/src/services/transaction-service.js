@@ -6,18 +6,21 @@ import { RecoveryActionRepository } from '../repositories/recovery-action-reposi
 import { RecoveryPredictionService } from '../intelligence/recovery-prediction-service.js';
 import { RecoveryDecisionPolicy } from '../intelligence/recovery-decision-policy.js';
 import { explainDecision } from '../intelligence/recovery-decision-explanation.js';
+import { buildDecisionAuditRecord } from '../intelligence/recovery-decision-audit-service.js';
 
 export class TransactionService {
   constructor(
     transactionRepository,
-    recoveryDecisionEngine = new RecoveryDecisionEngine(),
-    predictionService = new RecoveryPredictionService(),
-    decisionPolicy = new RecoveryDecisionPolicy(predictionService, recoveryDecisionEngine)
+    recoveryDecisionEngine,
+    predictionService,
+    decisionPolicy,
+    auditService = null
   ) {
     this.transactionRepository = transactionRepository;
-    this.recoveryDecisionEngine = recoveryDecisionEngine;
-    this.predictionService = predictionService;
-    this.decisionPolicy = decisionPolicy;
+    this.recoveryDecisionEngine = recoveryDecisionEngine ?? new RecoveryDecisionEngine();
+    this.predictionService = predictionService ?? new RecoveryPredictionService();
+    this.decisionPolicy = decisionPolicy ?? new RecoveryDecisionPolicy(this.predictionService, this.recoveryDecisionEngine);
+    this.auditService = auditService;
   }
 
   async createTransaction(data) {
@@ -86,10 +89,22 @@ export class TransactionService {
           status: 'RECOMMENDED'
         });
 
-        explanation = explainDecision({
+        const auditRecord = buildDecisionAuditRecord({
           decision,
           context: predictionContext,
-          correlation: { transaction_id: transactionId, attempt_id: attempt.id }
+          correlation: {
+            transaction_id: transactionId,
+            attempt_id: attempt.id,
+            recovery_action_id: recoveryAction.id
+          }
+        });
+
+        if (this.auditService) {
+          this.auditService.record(auditRecord);
+        }
+
+        explanation = explainDecision({
+          auditRecord
         });
       }
 

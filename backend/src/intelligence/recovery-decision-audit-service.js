@@ -105,6 +105,7 @@ export function buildDecisionAuditRecord({
 
   const transactionId = correlation.transaction_id ?? correlation.transactionId ?? context.transaction_id ?? context.transactionId ?? null;
   const attemptId = correlation.attempt_id ?? correlation.attemptId ?? context.attempt_id ?? context.attemptId ?? null;
+  const recoveryActionId = correlation.recovery_action_id ?? correlation.recoveryActionId ?? null;
 
   const failureCategory = firstDefined(context, ['failure_category', 'failureCategory']) ?? null;
   const paymentMethodAttempted = firstDefined(context, ['payment_method_attempted', 'paymentMethodAttempted', 'payment_method', 'paymentMethod']) ?? null;
@@ -163,7 +164,8 @@ export function buildDecisionAuditRecord({
     decision_timestamp: decisionTimestamp,
     correlation: {
       transaction_id: transactionId,
-      attempt_id: attemptId
+      attempt_id: attemptId,
+      recovery_action_id: recoveryActionId
     },
     context: {
       failure_category: failureCategory,
@@ -214,7 +216,7 @@ export class RecoveryDecisionAuditService {
   }
 
   record(params) {
-    const auditRecord = this.createAuditRecord(params);
+    const auditRecord = params?.audit_schema_version ? params : this.createAuditRecord(params);
     this.buffer.push(auditRecord);
     if (this.buffer.length > this.maxBufferedRecords) {
       this.buffer.shift();
@@ -228,6 +230,27 @@ export class RecoveryDecisionAuditService {
       records = records.filter(filter);
     }
     return records.slice(-limit);
+  }
+
+  findByRecoveryActionId(actionId, transactionId = null) {
+    if (!actionId) return null;
+    return this.buffer.find((record) =>
+      record.correlation.recovery_action_id === actionId &&
+      (!transactionId || record.correlation.transaction_id === transactionId)
+    ) ?? null;
+  }
+
+  findByAttemptId(attemptId, transactionId = null) {
+    if (!attemptId) return null;
+    return this.buffer.find((record) =>
+      record.correlation.attempt_id === attemptId &&
+      (!transactionId || record.correlation.transaction_id === transactionId)
+    ) ?? null;
+  }
+
+  findByTransactionId(transactionId) {
+    if (!transactionId) return [];
+    return this.buffer.filter((record) => record.correlation.transaction_id === transactionId);
   }
 
   getRecordCount() {
