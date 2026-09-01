@@ -22,3 +22,44 @@ button { font: inherit; cursor: pointer; }
 .recovery-panel { max-width: 920px; margin-top: 14px; padding: 25px 30px; border: 1px solid #e4d8b8; border-radius: 9px; background: #fffdf5; }.recovery-heading { display: flex; justify-content: space-between; gap: 20px; }.recovery-kicker { color: #b7792f; }.recovery-heading h2 { font-size: 20px; letter-spacing: -.5px; }.recovery-reason { max-width: 680px; margin-top: 9px; color: #756c58; font-size: 12px; line-height: 1.5; }.action-status { height: max-content; padding: 6px 9px; border-radius: 5px; font-size: 10px; font-weight: 700; }.action-recommended { color: #89621f; background: #fcebc4; }.action-success { color: #39724b; background: #e1f2dd; }.action-failed { color: #91492d; background: #ffe5d9; }.action-executed { color: #687269; background: #edf0eb; }.recovery-controls { display: flex; gap: 18px; margin: 22px 0 18px; }.recovery-controls .field { min-width: 190px; }.recovery-note { display: flex; flex-direction: column; justify-content: center; gap: 6px; min-width: 190px; padding: 0 14px; border-left: 2px solid #e4d8b8; color: #8d846f; font-size: 10px; }.recovery-note strong { color: #4f5c50; font-size: 13px; }.execution-result { display: flex; flex-direction: column; gap: 5px; margin-top: 20px; padding: 13px 14px; color: #39724b; background: #e8f2df; font-size: 11px; }.execution-result strong { font-size: 12px; }.executed-note { margin-top: 20px; color: #8a9189; font-size: 11px; }
 @media (max-width: 800px) { .sidebar { width: 68px; flex-basis: 68px; padding: 23px 9px 14px; }.brand-mark { padding: 0 9px 28px; }.brand-mark > span:last-child, .workspace-copy, .chevron, .nav-label, .nav-item:not(.is-active) { overflow: hidden; width: 0; white-space: nowrap; }.workspace-switcher { justify-content: center; padding: 8px; }.nav-item { justify-content: center; padding: 12px 8px; }.nav-count { display: none; }.user-row { justify-content: center; padding: 9px 0; }.user-row .more { display: none; }.page-wrap { padding: 0 22px 40px; }.topbar-actions .live-indicator { display: none; }.lower-grid { grid-template-columns: 1fr; } }
 @media (max-width: 540px) { .page-intro { align-items: start; flex-direction: column; padding-top: 34px; }.metric-grid { grid-template-columns: 1fr; }.foundation-panel { align-items: start; padding: 20px; }.panel-status { display: none; }.topbar { height: 62px; }.breadcrumbs { font-size: 11px; }.transaction-form, .transaction-success, .detail-panel { padding: 20px; }.form-header, .detail-heading { flex-direction: column; }.form-actions { justify-content: stretch; }.form-actions button { flex: 1; }.detail-grid { grid-template-columns: 1fr; } }
+
+
+/* Phase 2: Decision Explainability & Intelligence Styles */
+.explanation-card { margin-top: 18px; padding: 20px; border: 1px solid #e3e8dc; border-radius: 8px; background: #fafbfa; }
+.explanation-header { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin-bottom: 12px; }
+.explanation-badges { display: flex; align-items: center; gap: 8px; }
+.decision-badge { padding: 4px 9px; border-radius: 5px; font-size: 11px; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase; }
+.badge-ml { color: #28734d; background: #e1f2dd; border: 1px solid #c8e8c2; }
+.badge-rule { color: #89621f; background: #fcebc4; border: 1px solid #f2d79c; }
+.action-pill { padding: 4px 8px; border-radius: 4px; color: #354239; background: #ebeee8; font-family: 'Space Grotesk', sans-serif; font-size: 11px; font-weight: 700; }
+.probability-stat { display: flex; flex-direction: column; align-items: flex-end; }
+.probability-number { font-family: 'Space Grotesk', sans-serif; font-size: 20px; font-weight: 700; color: #28734d; }
+.probability-label { font-size: 10px; color: #7f887f; text-transform: uppercase; font-weight: 600; }
+.explanation-narrative { margin: 10px 0 16px; color: #434c44; font-size: 13px; line-height: 1.55; }
+.fallback-banner { margin: 14px 0; padding: 12px 14px; border-left: 3px solid #e8a84d; border-radius: 4px; background: #fff8eb; font-size: 12px; }
+.fallback-banner-header { display: flex; justify-content: space-between; align-items: center; }
+.fallback-banner-header strong { color: #89621f; font-size: 11px; }
+.fallback-reason-code { padding: 2px 6px; border-radius: 4px; background: #fae4b6; color: #745115; font-size: 10px; font-weight: 700; }
+.fallback-banner-copy { margin-top: 6px; color: #756138; font-size: 11px; line-height: 1.45; }
+.rejection-box { margin: 14px 0; padding: 12px 14px; border: 1px solid #eed6cc; border-radius: 6px; background: #fff3ee; }
+.rejection-eyebrow { color: #b85333; margin-bottom: 6px; }
+.rejection-list { margin: 0; padding-left: 18px; color: #8c4228; font-size: 11px; line-height: 1.5; }
+.rejection-item strong { color: #6d2c18; }
+.comparison-section { margin-top: 14px; border-top: 1px solid #e3e7df; padding-top: 12px; }
+.comparison-toggle-button { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 8px 0; border: 0; background: transparent; color: #4e875f; font-size: 11px; font-weight: 700; text-align: left; }
+.comparison-toggle-button:hover { color: #28734d; }
+.toggle-icon { font-size: 9px; margin-left: 8px; }
+.comparison-table-wrapper { margin-top: 10px; overflow-x: auto; }
+.comparison-table { width: 100%; border-collapse: collapse; font-size: 11px; text-align: left; }
+.comparison-table th { padding: 8px 10px; border-bottom: 1px solid #dde3d8; color: #7e887f; font-weight: 600; text-transform: uppercase; font-size: 10px; }
+.comparison-table td { padding: 9px 10px; border-bottom: 1px solid #ebeee8; color: #434c44; }
+.comparison-table .row-selected { background: #f0f7ec; }
+.status-pill { padding: 3px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.status-selected { color: #28734d; background: #dff2db; }
+.status-safety-rejection, .status-rejected-by-safety { color: #9c452a; background: #fde6dd; }
+.status-lower-probability, .status-considered-lower-probability { color: #6e766e; background: #e7ece5; }
+.rejection-cell { color: #7f887f; font-size: 10px; }
+.probability-disclaimer { display: block; margin-top: 8px; color: #8e968f; font-size: 10px; font-style: italic; }
+.recommendation-header-row { display: flex; justify-content: space-between; align-items: center; }
+.recommendation-action-row { display: flex; align-items: baseline; gap: 10px; margin: 4px 0 6px; }
+.recommendation-prob-tag { color: #28734d; font-size: 11px; font-weight: 600; }

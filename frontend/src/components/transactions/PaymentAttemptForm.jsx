@@ -25,6 +25,11 @@ function apiErrorMessage(error) {
   return error?.message || 'Unable to create the payment attempt. Please try again.';
 }
 
+function formatProbability(prob) {
+  if (prob === null || prob === undefined || typeof prob !== 'number') return 'N/A';
+  return `${(prob * 100).toFixed(1)}%`;
+}
+
 export function PaymentAttemptForm({ transaction, onTransactionUpdated }) {
   const [values, setValues] = useState(initialValues);
   const [errors, setErrors] = useState({});
@@ -59,13 +64,157 @@ export function PaymentAttemptForm({ transaction, onTransactionUpdated }) {
   }
 
   if (state.status === 'success') {
-    const { attempt, recoveryAction } = state.result;
-    return <section className="attempt-result" role="status"><div className="attempt-result-heading"><div><span className="panel-kicker success-kicker">Attempt recorded</span><h2>{attempt.outcome === 'SUCCESS' ? 'Payment succeeded.' : 'Payment failed.'}</h2></div><span className={`status-badge ${attempt.outcome === 'FAILED' ? 'failure-badge' : ''}`}>{attempt.status}</span></div><div className="attempt-summary"><SummaryRow label="Attempt number" value={`#${attempt.attemptNumber}`} /><SummaryRow label="Payment method" value={attempt.paymentMethod} /><SummaryRow label="Outcome" value={attempt.outcome} />{attempt.failureCategory && <SummaryRow label="Failure category" value={attempt.failureCategory} />}{attempt.failureReason && <SummaryRow label="Failure reason" value={attempt.failureReason} />}</div><div className="recommendation-box"><span className="eyebrow">Recovery recommendation</span><strong>{recoveryAction ? recoveryAction.actionType : 'None'}</strong><span>{recoveryAction ? recoveryAction.reason : 'No recovery action is needed for a successful attempt.'}</span></div><button className="secondary-button" type="button" onClick={() => setState({ status: 'idle', error: null, result: null })}>Simulate another attempt</button></section>;
+    const { attempt, recoveryAction, explanation } = state.result;
+    const isML = explanation?.decision_source === 'ML';
+    const selectedCandidate = explanation?.candidate_comparison?.find((c) => c.status === 'SELECTED' || c.action === explanation?.selected_action);
+    const selectedProb = selectedCandidate?.predicted_recovery_probability;
+
+    return (
+      <section className="attempt-result" role="status">
+        <div className="attempt-result-heading">
+          <div>
+            <span className="panel-kicker success-kicker">Attempt recorded</span>
+            <h2>{attempt.outcome === 'SUCCESS' ? 'Payment succeeded.' : 'Payment failed.'}</h2>
+          </div>
+          <span className={`status-badge ${attempt.outcome === 'FAILED' ? 'failure-badge' : ''}`}>
+            {attempt.status}
+          </span>
+        </div>
+        <div className="attempt-summary">
+          <SummaryRow label="Attempt number" value={`#${attempt.attemptNumber}`} />
+          <SummaryRow label="Payment method" value={attempt.paymentMethod} />
+          <SummaryRow label="Outcome" value={attempt.outcome} />
+          {attempt.failureCategory && <SummaryRow label="Failure category" value={attempt.failureCategory} />}
+          {attempt.failureReason && <SummaryRow label="Failure reason" value={attempt.failureReason} />}
+        </div>
+        <div className="recommendation-box">
+          <div className="recommendation-header-row">
+            <span className="eyebrow">Recovery recommendation</span>
+            {explanation && (
+              <span className={`decision-badge ${isML ? 'badge-ml' : 'badge-rule'}`}>
+                {isML ? 'ML Recommendation' : 'Rule Fallback'}
+              </span>
+            )}
+          </div>
+          <div className="recommendation-action-row">
+            <strong>{recoveryAction ? recoveryAction.actionType : 'None'}</strong>
+            {isML && typeof selectedProb === 'number' && (
+              <span className="recommendation-prob-tag">
+                {formatProbability(selectedProb)} estimated recovery probability
+              </span>
+            )}
+          </div>
+          <span>
+            {explanation?.human_readable_text || (recoveryAction ? recoveryAction.reason : 'No recovery action is needed for a successful attempt.')}
+          </span>
+        </div>
+        <button className="secondary-button" type="button" onClick={() => setState({ status: 'idle', error: null, result: null })}>
+          Simulate another attempt
+        </button>
+      </section>
+    );
   }
 
   const terminal = transaction.status === 'SUCCESS' || transaction.status === 'RECOVERED';
-  return <form className="attempt-form" onSubmit={handleSubmit} noValidate><div className="form-header"><div><span className="panel-kicker">Payment simulation</span><h2>Simulate Payment Attempt</h2><p>Record a provider outcome against this transaction.</p></div><span className="required-note">* Required</span></div>{state.status === 'error' && <div className="form-alert" role="alert"><strong>Could not record attempt</strong><span>{state.error}</span></div>}{terminal && <div className="form-alert terminal-alert" role="status"><strong>Transaction is complete</strong><span>No further payment attempts can be added.</span></div>}<div className="attempt-options"><ChoiceGroup label="Payment method" name="paymentMethod" value={values.paymentMethod} options={[['UPI', 'UPI'], ['CARD', 'Card'], ['NET_BANKING', 'Net banking']]} onChange={handleChange} error={errors.paymentMethod} /><ChoiceGroup label="Outcome" name="outcome" value={values.outcome} options={[['SUCCESS', 'Success'], ['FAILED', 'Failed']]} onChange={handleChange} error={errors.outcome} /></div>{values.outcome === 'FAILED' && <div className="failure-fields"><label className="field"><span>Failure category <em>*</em></span><div className={`input-wrap ${errors.failureCategory ? 'has-error' : ''}`}><select name="failureCategory" value={values.failureCategory} onChange={handleChange}><option value="">Select a category</option>{failureCategories.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></div>{errors.failureCategory && <small className="field-error">{errors.failureCategory}</small>}</label><label className="field"><span>Failure reason <em>*</em></span><textarea name="failureReason" value={values.failureReason} onChange={handleChange} placeholder="Bank server temporarily unavailable" rows="3" aria-invalid={Boolean(errors.failureReason)} />{errors.failureReason && <small className="field-error">{errors.failureReason}</small>}</label></div>}<div className="form-actions"><button className="primary-button" type="submit" disabled={state.status === 'loading' || terminal}>{state.status === 'loading' ? 'Recording...' : 'Record attempt'} <span>-&gt;</span></button></div></form>;
+  return (
+    <form className="attempt-form" onSubmit={handleSubmit} noValidate>
+      <div className="form-header">
+        <div>
+          <span className="panel-kicker">Payment simulation</span>
+          <h2>Simulate Payment Attempt</h2>
+          <p>Record a provider outcome against this transaction.</p>
+        </div>
+        <span className="required-note">* Required</span>
+      </div>
+      {state.status === 'error' && (
+        <div className="form-alert" role="alert">
+          <strong>Could not record attempt</strong>
+          <span>{state.error}</span>
+        </div>
+      )}
+      {terminal && (
+        <div className="form-alert terminal-alert" role="status">
+          <strong>Transaction is complete</strong>
+          <span>No further payment attempts can be added.</span>
+        </div>
+      )}
+      <div className="attempt-options">
+        <ChoiceGroup
+          label="Payment method"
+          name="paymentMethod"
+          value={values.paymentMethod}
+          options={[['UPI', 'UPI'], ['CARD', 'Card'], ['NET_BANKING', 'Net banking']]}
+          onChange={handleChange}
+          error={errors.paymentMethod}
+        />
+        <ChoiceGroup
+          label="Outcome"
+          name="outcome"
+          value={values.outcome}
+          options={[['SUCCESS', 'Success'], ['FAILED', 'Failed']]}
+          onChange={handleChange}
+          error={errors.outcome}
+        />
+      </div>
+      {values.outcome === 'FAILED' && (
+        <div className="failure-fields">
+          <label className="field">
+            <span>Failure category <em>*</em></span>
+            <div className={`input-wrap ${errors.failureCategory ? 'has-error' : ''}`}>
+              <select name="failureCategory" value={values.failureCategory} onChange={handleChange}>
+                <option value="">Select a category</option>
+                {failureCategories.map(([value, label]) => (
+                  <option value={value} key={value}>{label}</option>
+                ))}
+              </select>
+            </div>
+            {errors.failureCategory && <small className="field-error">{errors.failureCategory}</small>}
+          </label>
+          <label className="field">
+            <span>Failure reason <em>*</em></span>
+            <textarea
+              name="failureReason"
+              value={values.failureReason}
+              onChange={handleChange}
+              placeholder="Bank server temporarily unavailable"
+              rows="3"
+              aria-invalid={Boolean(errors.failureReason)}
+            />
+            {errors.failureReason && <small className="field-error">{errors.failureReason}</small>}
+          </label>
+        </div>
+      )}
+      <div className="form-actions">
+        <button className="primary-button" type="submit" disabled={state.status === 'loading' || terminal}>
+          {state.status === 'loading' ? 'Recording...' : 'Record attempt'} <span>-&gt;</span>
+        </button>
+      </div>
+    </form>
+  );
 }
 
-function ChoiceGroup({ label, name, value, options, onChange, error }) { return <fieldset className="choice-group"><legend>{label} <em>*</em></legend><div className="choice-options">{options.map(([optionValue, optionLabel]) => <label className={`choice ${value === optionValue ? 'is-selected' : ''}`} key={optionValue}><input type="radio" name={name} value={optionValue} checked={value === optionValue} onChange={onChange} />{optionLabel}</label>)}</div>{error && <small className="field-error">{error}</small>}</fieldset>; }
-function SummaryRow({ label, value }) { return <div className="summary-row"><span>{label}</span><strong>{value}</strong></div>; }
+function ChoiceGroup({ label, name, value, options, onChange, error }) {
+  return (
+    <fieldset className="choice-group">
+      <legend>{label} <em>*</em></legend>
+      <div className="choice-options">
+        {options.map(([optionValue, optionLabel]) => (
+          <label className={`choice ${value === optionValue ? 'is-selected' : ''}`} key={optionValue}>
+            <input type="radio" name={name} value={optionValue} checked={value === optionValue} onChange={onChange} />
+            {optionLabel}
+          </label>
+        ))}
+      </div>
+      {error && <small className="field-error">{error}</small>}
+    </fieldset>
+  );
+}
+
+function SummaryRow({ label, value }) {
+  return (
+    <div className="summary-row">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}

@@ -5,6 +5,7 @@ import { RecoveryDecisionEngine } from './recovery-decision-engine.js';
 import { RecoveryActionRepository } from '../repositories/recovery-action-repository.js';
 import { RecoveryPredictionService } from '../intelligence/recovery-prediction-service.js';
 import { RecoveryDecisionPolicy } from '../intelligence/recovery-decision-policy.js';
+import { explainDecision } from '../intelligence/recovery-decision-explanation.js';
 
 export class TransactionService {
   constructor(
@@ -55,6 +56,7 @@ export class TransactionService {
       await repository.updateStatus(transactionId, data.outcome === 'SUCCESS' ? TransactionStatus.SUCCESS : TransactionStatus.FAILED);
 
       let recoveryAction = null;
+      let explanation = null;
       if (data.outcome === 'FAILED') {
         const failedAttempts = Array.isArray(transaction.failedAttempts)
           ? transaction.failedAttempts
@@ -83,9 +85,15 @@ export class TransactionService {
           reason: decision.reason,
           status: 'RECOMMENDED'
         });
+
+        explanation = explainDecision({
+          decision,
+          context: predictionContext,
+          correlation: { transaction_id: transactionId, attempt_id: attempt.id }
+        });
       }
 
-      return { attempt: toPaymentAttemptResponse(attempt), recoveryAction };
+      return { attempt: toPaymentAttemptResponse(attempt), recoveryAction, explanation };
     });
   }
 }

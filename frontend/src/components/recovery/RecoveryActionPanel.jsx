@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { executeRecovery, getTransaction } from '../../services/api/client.js';
+import { DecisionExplanationCard } from './DecisionExplanationCard.jsx';
 
 const paymentMethods = [
   ['UPI', 'UPI'],
@@ -14,7 +15,7 @@ const actionCopy = {
   ESCALATE: { title: 'Escalate transaction', description: 'This payment should be reviewed by your operations team.' },
 };
 
-export function RecoveryActionPanel({ transaction, onTransactionUpdated }) {
+export function RecoveryActionPanel({ transaction, onTransactionUpdated, explanation = null }) {
   const actions = [...(transaction.recoveryActions || [])].sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt));
   const action = actions[0];
   const failedAttempt = action ? transaction.paymentAttempts?.find((attempt) => attempt.id === action.attemptId) : null;
@@ -48,7 +49,94 @@ export function RecoveryActionPanel({ transaction, onTransactionUpdated }) {
   }
 
   const displayedStatus = state.status === 'success' ? state.result.recoveryAction.status : action.status;
-  return <section className="recovery-panel"><div className="recovery-heading"><div><span className="panel-kicker recovery-kicker">Recovery recommendation</span><h2>{copy.title}</h2></div><span className={`action-status action-${displayedStatus.toLowerCase()}`}>{displayedStatus}</span></div><p className="recovery-reason">{action.reason}</p>{state.status === 'error' && <div className="form-alert" role="alert"><strong>Could not execute recovery</strong><span>{state.error}</span></div>}{state.status === 'success' && <div className="execution-result" role="status"><strong>Recovery execution completed</strong><span>{state.result.attempt ? `Attempt #${state.result.attempt.attemptNumber} recorded with ${state.result.attempt.outcome}.` : 'No payment attempt was created for this action.'}</span></div>}{canExecute && <form onSubmit={handleExecute}><div className="recovery-controls">{isAttemptAction && <label className="field"><span>Provider outcome <em>*</em></span><div className="input-wrap"><select value={providerOutcome} onChange={(event) => setProviderOutcome(event.target.value)}><option value="SUCCESS">Success</option><option value="FAILED">Failed</option></select></div></label>}{action.actionType === 'RETRY' && <div className="recovery-note"><span>Original method</span><strong>{failedAttempt?.paymentMethod || 'Automatic'}</strong></div>}{action.actionType === 'ALTERNATE_METHOD' && <label className="field"><span>Alternate payment method <em>*</em></span><div className="input-wrap"><select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}><option value="">Select a different method</option>{paymentMethods.filter(([value]) => value !== failedAttempt?.paymentMethod).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></div></label>}</div><button className="primary-button" type="submit" disabled={state.status === 'loading' || (action.actionType === 'ALTERNATE_METHOD' && (!paymentMethod || paymentMethod === failedAttempt?.paymentMethod))}>{state.status === 'loading' ? 'Executing...' : `Execute ${action.actionType === 'RETRY' ? 'retry' : action.actionType === 'ALTERNATE_METHOD' ? 'alternate method' : 'action'}`} <span>-&gt;</span></button></form>}{!canExecute && state.status !== 'success' && <p className="executed-note">This recovery action is no longer available for execution.</p>}</section>;
+  return (
+    <section className="recovery-panel">
+      <div className="recovery-heading">
+        <div>
+          <span className="panel-kicker recovery-kicker">Recovery recommendation</span>
+          <h2>{copy.title}</h2>
+        </div>
+        <span className={`action-status action-${displayedStatus.toLowerCase()}`}>{displayedStatus}</span>
+      </div>
+
+      {explanation ? (
+        <DecisionExplanationCard explanation={explanation} />
+      ) : (
+        <p className="recovery-reason">{action.reason}</p>
+      )}
+
+      {state.status === 'error' && (
+        <div className="form-alert" role="alert">
+          <strong>Could not execute recovery</strong>
+          <span>{state.error}</span>
+        </div>
+      )}
+
+      {state.status === 'success' && (
+        <div className="execution-result" role="status">
+          <strong>Recovery execution completed</strong>
+          <span>
+            {state.result.attempt
+              ? `Attempt #${state.result.attempt.attemptNumber} recorded with ${state.result.attempt.outcome}.`
+              : 'No payment attempt was created for this action.'}
+          </span>
+        </div>
+      )}
+
+      {canExecute && (
+        <form onSubmit={handleExecute}>
+          <div className="recovery-controls">
+            {isAttemptAction && (
+              <label className="field">
+                <span>Provider outcome <em>*</em></span>
+                <div className="input-wrap">
+                  <select value={providerOutcome} onChange={(event) => setProviderOutcome(event.target.value)}>
+                    <option value="SUCCESS">Success</option>
+                    <option value="FAILED">Failed</option>
+                  </select>
+                </div>
+              </label>
+            )}
+            {action.actionType === 'RETRY' && (
+              <div className="recovery-note">
+                <span>Original method</span>
+                <strong>{failedAttempt?.paymentMethod || 'Automatic'}</strong>
+              </div>
+            )}
+            {action.actionType === 'ALTERNATE_METHOD' && (
+              <label className="field">
+                <span>Alternate payment method <em>*</em></span>
+                <div className="input-wrap">
+                  <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
+                    <option value="">Select a different method</option>
+                    {paymentMethods
+                      .filter(([value]) => value !== failedAttempt?.paymentMethod)
+                      .map(([value, label]) => (
+                        <option value={value} key={value}>{label}</option>
+                      ))}
+                  </select>
+                </div>
+              </label>
+            )}
+          </div>
+          <button
+            className="primary-button"
+            type="submit"
+            disabled={state.status === 'loading' || (action.actionType === 'ALTERNATE_METHOD' && (!paymentMethod || paymentMethod === failedAttempt?.paymentMethod))}
+          >
+            {state.status === 'loading'
+              ? 'Executing...'
+              : `Execute ${action.actionType === 'RETRY' ? 'retry' : action.actionType === 'ALTERNATE_METHOD' ? 'alternate method' : 'action'}`}
+            <span>-&gt;</span>
+          </button>
+        </form>
+      )}
+
+      {!canExecute && state.status !== 'success' && (
+        <p className="executed-note">This recovery action is no longer available for execution.</p>
+      )}
+    </section>
+  );
 }
 
 function formatError(error) {

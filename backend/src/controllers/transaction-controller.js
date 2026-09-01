@@ -16,7 +16,13 @@ export class TransactionController {
 
   createAttempt = async (req, res) => {
     const result = await this.transactionService.createPaymentAttempt(req.params.transactionId, validateCreatePaymentAttempt(req.body));
-    res.status(201).json({ data: { attempt: result.attempt, recoveryAction: result.recoveryAction ? toRecoveryActionResponse(result.recoveryAction) : null } });
+    res.status(201).json({
+      data: {
+        attempt: result.attempt,
+        recoveryAction: result.recoveryAction ? toRecoveryActionResponse(result.recoveryAction) : null,
+        explanation: result.explanation ?? null
+      }
+    });
   };
 
   executeRecovery = async (req, res) => {

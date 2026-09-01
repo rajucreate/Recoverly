@@ -1,8 +1,101 @@
+import { useState } from 'react';
 import { PaymentAttemptForm } from '../components/transactions/PaymentAttemptForm.jsx';
 import { RecoveryActionPanel } from '../components/recovery/RecoveryActionPanel.jsx';
 
 export function TransactionDetailPage({ transaction, onBack, onTransactionUpdated }) {
-  return <div className="page-wrap"><header className="topbar"><div className="breadcrumbs"><span>Workspace</span><span>/</span><button className="breadcrumb-button" type="button" onClick={onBack}>Transactions</button><span>/</span><strong>Transaction detail</strong></div></header><section className="page-intro compact-intro"><div><p className="eyebrow">Transaction detail</p><h1>Transaction overview</h1><p className="intro-copy">Review the payment record before adding an attempt.</p></div><button className="secondary-button" type="button" onClick={onBack}>&lt;- Back to transactions</button></section><section className="detail-panel"><div className="detail-heading"><div><span className="panel-kicker">Created transaction</span><h2>{transaction.id}</h2></div><span className="status-badge">{transaction.status}</span></div><div className="detail-grid"><DetailItem label="Amount" value={`${transaction.currency} ${transaction.amount}`} /><DetailItem label="Currency" value={transaction.currency} /><DetailItem label="Customer ID" value={transaction.customerId} /><DetailItem label="Created" value={formatDate(transaction.createdAt)} /></div></section><RecoveryActionPanel transaction={transaction} onTransactionUpdated={onTransactionUpdated} /><PaymentAttemptForm transaction={transaction} onTransactionUpdated={onTransactionUpdated} />{transaction.paymentAttempts?.length > 0 && <section className="history-panel"><div className="panel-header"><div><span className="eyebrow">Server history</span><h2>Payment attempts</h2></div><span className="history-count">{transaction.paymentAttempts.length}</span></div><div className="history-list">{transaction.paymentAttempts.map((attempt) => <div className="history-row" key={attempt.id}><strong>Attempt #{attempt.attemptNumber}</strong><span>{attempt.paymentMethod}</span><span className={attempt.status === 'SUCCESS' ? 'history-success' : 'history-failure'}>{attempt.status}</span><small>{attempt.failureReason || 'No failure information'}</small></div>)}</div></section>}</div>;
+  const [latestExplanation, setLatestExplanation] = useState(null);
+
+  function handleTransactionUpdated(updatedTransaction, attemptResult) {
+    if (attemptResult?.explanation) {
+      setLatestExplanation(attemptResult.explanation);
+    }
+    onTransactionUpdated(updatedTransaction);
+  }
+
+  return (
+    <div className="page-wrap">
+      <header className="topbar">
+        <div className="breadcrumbs">
+          <span>Workspace</span>
+          <span>/</span>
+          <button className="breadcrumb-button" type="button" onClick={onBack}>Transactions</button>
+          <span>/</span>
+          <strong>Transaction detail</strong>
+        </div>
+      </header>
+      <section className="page-intro compact-intro">
+        <div>
+          <p className="eyebrow">Transaction detail</p>
+          <h1>Transaction overview</h1>
+          <p className="intro-copy">Review the payment record before adding an attempt.</p>
+        </div>
+        <button className="secondary-button" type="button" onClick={onBack}>
+          &lt;- Back to transactions
+        </button>
+      </section>
+      <section className="detail-panel">
+        <div className="detail-heading">
+          <div>
+            <span className="panel-kicker">Created transaction</span>
+            <h2>{transaction.id}</h2>
+          </div>
+          <span className="status-badge">{transaction.status}</span>
+        </div>
+        <div className="detail-grid">
+          <DetailItem label="Amount" value={`${transaction.currency} ${transaction.amount}`} />
+          <DetailItem label="Currency" value={transaction.currency} />
+          <DetailItem label="Customer ID" value={transaction.customerId} />
+          <DetailItem label="Created" value={formatDate(transaction.createdAt)} />
+        </div>
+      </section>
+
+      <RecoveryActionPanel
+        transaction={transaction}
+        onTransactionUpdated={handleTransactionUpdated}
+        explanation={latestExplanation}
+      />
+
+      <PaymentAttemptForm
+        transaction={transaction}
+        onTransactionUpdated={handleTransactionUpdated}
+      />
+
+      {transaction.paymentAttempts?.length > 0 && (
+        <section className="history-panel">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow">Server history</span>
+              <h2>Payment attempts</h2>
+            </div>
+            <span className="history-count">{transaction.paymentAttempts.length}</span>
+          </div>
+          <div className="history-list">
+            {transaction.paymentAttempts.map((attempt) => (
+              <div className="history-row" key={attempt.id}>
+                <strong>Attempt #{attempt.attemptNumber}</strong>
+                <span>{attempt.paymentMethod}</span>
+                <span className={attempt.status === 'SUCCESS' ? 'history-success' : 'history-failure'}>
+                  {attempt.status}
+                </span>
+                <small>{attempt.failureReason || 'No failure information'}</small>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
 }
-function DetailItem({ label, value }) { return <div className="detail-item"><span>{label}</span><strong>{value}</strong></div>; }
-function formatDate(value) { return value ? new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Unavailable'; }
+
+function DetailItem({ label, value }) {
+  return (
+    <div className="detail-item">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function formatDate(value) {
+  return value ? new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Unavailable';
+}
