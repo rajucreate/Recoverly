@@ -56,15 +56,22 @@ export class TransactionService {
 
       let recoveryAction = null;
       if (data.outcome === 'FAILED') {
+        const failedAttempts = Array.isArray(transaction.failedAttempts)
+          ? transaction.failedAttempts
+          : (Array.isArray(transaction.paymentAttempts) ? transaction.paymentAttempts : []);
+        const temporaryFailures = Array.isArray(transaction.paymentAttempts)
+          ? transaction.paymentAttempts.filter((a) => !a.failureCategory || a.failureCategory === 'TEMPORARY_FAILURE')
+          : [];
+
         const predictionContext = {
           transaction_amount: transaction.amount,
           currency: transaction.currency,
           payment_method_attempted: data.paymentMethod,
           failure_category: data.failureCategory,
           has_failure_reason: !!data.failureReason,
-          attempt_number: transaction._count.paymentAttempts + 1,
-          prior_failed_attempt_count: transaction.failedAttempts?.length ?? 0,
-          prior_temporary_failure_count: transaction.paymentAttempts?.length ?? 0,
+          attempt_number: (transaction._count?.paymentAttempts ?? 0) + 1,
+          prior_failed_attempt_count: failedAttempts.length,
+          prior_temporary_failure_count: temporaryFailures.length,
           transaction_status: 'FAILED'
         };
 

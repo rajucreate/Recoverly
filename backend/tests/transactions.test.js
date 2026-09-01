@@ -4,6 +4,8 @@ import { createApp } from '../src/app.js';
 import { TransactionRepository } from '../src/repositories/transaction-repository.js';
 import { TransactionService } from '../src/services/transaction-service.js';
 import { RecoveryExecutionService } from '../src/services/recovery-execution-service.js';
+import { RecoveryDecisionEngine } from '../src/services/recovery-decision-engine.js';
+import { RecoveryDecisionPolicy } from '../src/intelligence/recovery-decision-policy.js';
 import { SimulatedPaymentProvider } from '../src/providers/simulated-payment-provider.js';
 
 const transactionId = 'c4c23c30-99e8-4d89-9e12-5a3cbd7c740a';
@@ -81,8 +83,12 @@ function buildApp({ transaction = makeTransaction(), failUpdate = false, failRec
     try { return await work(client); } catch (error) { state.transactions = snapshot.transactions; state.attempts = snapshot.attempts; state.recoveryActions = snapshot.recoveryActions; throw error; }
   });
   const repository = new TransactionRepository(client);
+  const decisionPolicy = new RecoveryDecisionPolicy(
+    { predictAll: () => { throw new Error('ML model bypassed in Phase 1 regression test'); } },
+    new RecoveryDecisionEngine()
+  );
   const app = createApp({
-    transactionService: new TransactionService(repository),
+    transactionService: new TransactionService(repository, new RecoveryDecisionEngine(), undefined, decisionPolicy),
     recoveryExecutionService: new RecoveryExecutionService(repository, new SimulatedPaymentProvider())
   });
   return { app, client, state };

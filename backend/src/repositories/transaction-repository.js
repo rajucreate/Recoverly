@@ -19,12 +19,8 @@ export class TransactionRepository {
         currency: true,
         _count: { select: { paymentAttempts: true } },
         paymentAttempts: {
-          where: { status: 'FAILED', failureCategory: 'TEMPORARY_FAILURE' },
-          select: { id: true }
-        },
-        failedAttempts: {
           where: { status: 'FAILED' },
-          select: { id: true }
+          select: { id: true, failureCategory: true }
         }
       }
     });
