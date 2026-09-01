@@ -375,100 +375,110 @@ export function renderEvaluationReport(metadata) {
     .map(([act, d]) => `| \`${act}\` | ${d.rule_selection_count} (${(d.rule_selection_share * 100).toFixed(1)}%) | ${(d.rule_success_rate * 100).toFixed(2)}% | ${d.ml_selection_count} (${(d.ml_selection_share * 100).toFixed(1)}%) | ${(d.ml_success_rate * 100).toFixed(2)}% |`)
     .join('\n');
 
-  return `# Phase 2: Rule-Based vs Intelligent Recovery Evaluation (Task 6.6)
+  const formatSignedPp = (val) => {
+    const num = Number(val);
+    const sign = num > 0 ? '+' : '';
+    return `${sign}${num.toFixed(2)} pp`;
+  };
 
-## 1. Evaluation Objective & Scope
+  const lines = [
+    '# Phase 2: Rule-Based vs Intelligent Recovery Evaluation (Task 6.6)',
+    '',
+    '## 1. Evaluation Objective & Scope',
+    '',
+    'This offline evaluation compares the existing **Phase 1 deterministic rule engine** (`RecoveryDecisionEngine`) against the **frozen Phase 2 Intelligent Recovery Policy** (`RecoveryDecisionPolicy`) on identical held-out test scenarios.',
+    '',
+    `- **Frozen ML Model:** \`${metadata.model_version}\``,
+    `- **Feature Schema Version:** \`${metadata.feature_schema_version}\``,
+    `- **Dataset Version:** \`${metadata.dataset_version}\``,
+    `- **Test Split Version:** \`${metadata.test_split_version}\``,
+    `- **Evaluated At:** \`${metadata.evaluated_at}\``,
+    `- **Evaluation Version:** \`${metadata.evaluation_version}\``,
+    '',
+    '> [!IMPORTANT]',
+    '> The model artifact was loaded as-is without retraining, parameter tuning, or coefficient adjustments. The evaluation is offline and simulated; no live execution, database mutations, or provider calls occurred.',
+    '',
+    '---',
+    '',
+    '## 2. Evaluation Methodology',
+    '',
+    '1. **Held-Out Test Set:** 1,200 chronologically partitioned test scenarios from `data/phase-2/recovery_dataset_v1.csv` (the latest 20% temporal slice).',
+    '2. **Context Reconstruction:** Each scenario\'s complete decision-time context (`transaction_amount`, `currency`, `payment_method`, `failure_category`, `attempt_number`, and failure counters) was reconstructed from canonical historical records without fabricating missing features.',
+    '3. **Paired Decision Scoring:** For every individual scenario:',
+    '   - Phase 1 `RecoveryDecisionEngine` selected a recovery action.',
+    '   - Phase 2 `RecoveryDecisionPolicy` selected a recovery action.',
+    '   - The same canonical recovery outcome function was evaluated for both strategies.',
+    '4. **Primary Comparison Metric:** `recovery_success_rate` (expected successful recoveries / total evaluated scenarios).',
+    '',
+    '---',
+    '',
+    '## 3. Aggregate Comparison Results',
+    '',
+    '| Metric | Phase 1 Rule Engine | Phase 2 Intelligent Policy | Absolute Improvement | Relative Improvement |',
+    '|---|---:|---:|---:|---:|',
+    `| **Recovery Success Rate** | **${(m.rule_engine.recovery_success_rate * 100).toFixed(2)}%** | **${(m.ml_policy.recovery_success_rate * 100).toFixed(2)}%** | **${formatSignedPp(imp.absolute_percentage_points)}** | **${imp.relative_percentage >= 0 ? '+' : ''}${imp.relative_percentage.toFixed(2)}%** |`,
+    `| Total Evaluated Scenarios | ${m.total_evaluated_scenarios} | ${m.total_evaluated_scenarios} | — | — |`,
+    `| Expected Successful Recoveries | ${m.rule_engine.successful_recoveries} | ${m.ml_policy.successful_recoveries} | ${m.ml_policy.successful_recoveries >= m.rule_engine.successful_recoveries ? '+' : ''}${(m.ml_policy.successful_recoveries - m.rule_engine.successful_recoveries).toFixed(2)} | — |`,
+    `| Expected Failed Recoveries | ${m.rule_engine.failed_recoveries} | ${m.ml_policy.failed_recoveries} | ${(m.ml_policy.failed_recoveries - m.rule_engine.failed_recoveries).toFixed(2)} | — |`,
+    `| Escalation Rate | ${(m.rule_engine.escalation_rate * 100).toFixed(2)}% | ${(m.ml_policy.escalation_rate * 100).toFixed(2)}% | ${formatSignedPp((m.ml_policy.escalation_rate - m.rule_engine.escalation_rate) * 100)} | — |`,
+    `| RETRY Success Rate | ${(m.rule_engine.retry_success_rate * 100).toFixed(2)}% | ${(m.ml_policy.retry_success_rate * 100).toFixed(2)}% | ${formatSignedPp((m.ml_policy.retry_success_rate - m.rule_engine.retry_success_rate) * 100)} | — |`,
+    `| ALTERNATE_METHOD Success Rate | ${(m.rule_engine.alternate_method_success_rate * 100).toFixed(2)}% | ${(m.ml_policy.alternate_method_success_rate * 100).toFixed(2)}% | ${formatSignedPp((m.ml_policy.alternate_method_success_rate - m.rule_engine.alternate_method_success_rate) * 100)} | — |`,
+    '',
+    '---',
+    '',
+    '## 4. Paired Scenario Comparison',
+    '',
+    'Direct paired decision comparison on identical test scenarios:',
+    '',
+    '| Outcome | Scenarios | Share of Test Set |',
+    '|---|---:|---:|',
+    `| **ML Wins (Higher Recovery Probability)** | **${p.ml_wins}** | **${(p.ml_win_rate * 100).toFixed(2)}%** |`,
+    `| **Rule Wins (Higher Recovery Probability)** | **${p.rule_wins}** | **${(p.rule_win_rate * 100).toFixed(2)}%** |`,
+    `| **Ties (Identical Expected Outcome)** | **${p.ties}** | **${(p.tie_rate * 100).toFixed(2)}%** |`,
+    '',
+    '---',
+    '',
+    '## 5. Segment Analysis',
+    '',
+    '### 5.1 By Failure Category',
+    '',
+    '| Failure Category | Scenarios | Rule Recovery Rate | ML Recovery Rate | Difference |',
+    '|---|---:|---:|---:|---:|',
+    failureCategoryRows,
+    '',
+    '### 5.2 By Attempted Payment Method',
+    '',
+    '| Payment Method | Scenarios | Rule Recovery Rate | ML Recovery Rate | Difference |',
+    '|---|---:|---:|---:|---:|',
+    paymentMethodRows,
+    '',
+    '### 5.3 Action Selection Breakdown',
+    '',
+    '| Action Type | Rule Selection Count (Share) | Rule Success Rate | ML Selection Count (Share) | ML Success Rate |',
+    '|---|---|---:|---|---:|',
+    actionRows,
+    '',
+    '---',
+    '',
+    '## 6. Historical Matched Replay',
+    '',
+    'When evaluating solely on the subset of scenarios where the strategy selected the exact historical action recorded in the logged dataset:',
+    '',
+    `- **Phase 1 Rule Engine Matched:** ${m.matched_historical_replay.rule_matched_scenarios} scenarios → **${(m.matched_historical_replay.rule_matched_success_rate * 100).toFixed(2)}%** observed recovery rate`,
+    `- **Phase 2 ML Policy Matched:** ${m.matched_historical_replay.ml_matched_scenarios} scenarios → **${(m.matched_historical_replay.ml_matched_success_rate * 100).toFixed(2)}%** observed recovery rate`,
+    '',
+    '---',
+    '',
+    '## 7. Limitations & Methodology Safeguards',
+    '',
+    '1. **Synthetic Data Generation:** Evaluation is conducted on synthetic transaction records generated according to Phase 2 6.2.1 specifications.',
+    '2. **Offline Nature:** This is an offline counterfactual simulation and does not measure live online user behavior or external provider outages.',
+    '3. **No Retraining or Tuning:** The model was evaluated without post-hoc optimization or threshold tuning.',
+    '4. **Safety Verification:** All decisions adhered strictly to retry limits (`RETRY_LIMIT = 2`), duplicate execution guards, and alternate-method constraints.',
+    ''
+  ];
 
-This offline evaluation compares the existing **Phase 1 deterministic rule engine** (`RecoveryDecisionEngine`) against the **frozen Phase 2 Intelligent Recovery Policy** (`RecoveryDecisionPolicy`) on identical held-out test scenarios.
-
-- **Frozen ML Model:** \`${metadata.model_version}\`
-- **Feature Schema Version:** \`${metadata.feature_schema_version}\`
-- **Dataset Version:** \`${metadata.dataset_version}\`
-- **Test Split Version:** \`${metadata.test_split_version}\`
-- **Evaluated At:** \`${metadata.evaluated_at}\`
-- **Evaluation Version:** \`${metadata.evaluation_version}\`
-
-> [!IMPORTANT]
-> The model artifact was loaded as-is without retraining, parameter tuning, or coefficient adjustments. The evaluation is offline and simulated; no live execution, database mutations, or provider calls occurred.
-
----
-
-## 2. Evaluation Methodology
-
-1. **Held-Out Test Set:** 1,200 chronologically partitioned test scenarios from \`data/phase-2/recovery_dataset_v1.csv\` (the latest 20% temporal slice).
-2. **Context Reconstruction:** Each scenario's complete decision-time context (\`transaction_amount\`, \`currency\`, \`payment_method\`, \`failure_category\`, \`attempt_number\`, and failure counters) was reconstructed from canonical historical records without fabricating missing features.
-3. **Paired Decision Scoring:** For every individual scenario:
-   - Phase 1 \`RecoveryDecisionEngine\` selected a recovery action.
-   - Phase 2 \`RecoveryDecisionPolicy\` selected a recovery action.
-   - The same canonical recovery outcome function was evaluated for both strategies.
-4. **Primary Comparison Metric:** \`recovery_success_rate\` (expected successful recoveries / total evaluated scenarios).
-
----
-
-## 3. Aggregate Comparison Results
-
-| Metric | Phase 1 Rule Engine | Phase 2 Intelligent Policy | Absolute Improvement | Relative Improvement |
-|---|---:|---:|---:|---:|
-| **Recovery Success Rate** | **${(m.rule_engine.recovery_success_rate * 100).toFixed(2)}%** | **${(m.ml_policy.recovery_success_rate * 100).toFixed(2)}%** | **+${imp.absolute_percentage_points.toFixed(2)} pp** | **+${imp.relative_percentage.toFixed(2)}%** |
-| Total Evaluated Scenarios | ${m.total_evaluated_scenarios} | ${m.total_evaluated_scenarios} | — | — |
-| Expected Successful Recoveries | ${m.rule_engine.successful_recoveries} | ${m.ml_policy.successful_recoveries} | +${(m.ml_policy.successful_recoveries - m.rule_engine.successful_recoveries).toFixed(2)} | — |
-| Expected Failed Recoveries | ${m.rule_engine.failed_recoveries} | ${m.ml_policy.failed_recoveries} | -${(m.rule_engine.failed_recoveries - m.ml_policy.failed_recoveries).toFixed(2)} | — |
-| Escalation Rate | ${(m.rule_engine.escalation_rate * 100).toFixed(2)}% | ${(m.ml_policy.escalation_rate * 100).toFixed(2)}% | ${( (m.ml_policy.escalation_rate - m.rule_engine.escalation_rate) * 100).toFixed(2)} pp | — |
-| RETRY Success Rate | ${(m.rule_engine.retry_success_rate * 100).toFixed(2)}% | ${(m.ml_policy.retry_success_rate * 100).toFixed(2)}% | +${((m.ml_policy.retry_success_rate - m.rule_engine.retry_success_rate) * 100).toFixed(2)} pp | — |
-| ALTERNATE_METHOD Success Rate | ${(m.rule_engine.alternate_method_success_rate * 100).toFixed(2)}% | ${(m.ml_policy.alternate_method_success_rate * 100).toFixed(2)}% | +${((m.ml_policy.alternate_method_success_rate - m.rule_engine.alternate_method_success_rate) * 100).toFixed(2)} pp | — |
-
----
-
-## 4. Paired Scenario Comparison
-
-Direct paired decision comparison on identical test scenarios:
-
-| Outcome | Scenarios | Share of Test Set |
-|---|---:|---:|
-| **ML Wins (Higher Recovery Probability)** | **${p.ml_wins}** | **${(p.ml_win_rate * 100).toFixed(2)}%** |
-| **Rule Wins (Higher Recovery Probability)** | **${p.rule_wins}** | **${(p.rule_win_rate * 100).toFixed(2)}%** |
-| **Ties (Identical Expected Outcome)** | **${p.ties}** | **${(p.tie_rate * 100).toFixed(2)}%** |
-
----
-
-## 5. Segment Analysis
-
-### 5.1 By Failure Category
-
-| Failure Category | Scenarios | Rule Recovery Rate | ML Recovery Rate | Difference |
-|---|---:|---:|---:|---:|
-${failureCategoryRows}
-
-### 5.2 By Attempted Payment Method
-
-| Payment Method | Scenarios | Rule Recovery Rate | ML Recovery Rate | Difference |
-|---|---:|---:|---:|---:|
-${paymentMethodRows}
-
-### 5.3 Action Selection Breakdown
-
-| Action Type | Rule Selection Count (Share) | Rule Success Rate | ML Selection Count (Share) | ML Success Rate |
-|---|---|---:|---|---:|
-${actionRows}
-
----
-
-## 6. Historical Matched Replay
-
-When evaluating solely on the subset of scenarios where the strategy selected the exact historical action recorded in the logged dataset:
-
-- **Phase 1 Rule Engine Matched:** ${m.matched_historical_replay.rule_matched_scenarios} scenarios → **${(m.matched_historical_replay.rule_matched_success_rate * 100).toFixed(2)}%** observed recovery rate
-- **Phase 2 ML Policy Matched:** ${m.matched_historical_replay.ml_matched_scenarios} scenarios → **${(m.matched_historical_replay.ml_matched_success_rate * 100).toFixed(2)}%** observed recovery rate
-
----
-
-## 7. Limitations & Methodology Safeguards
-
-1. **Synthetic Data Generation:** Evaluation is conducted on synthetic transaction records generated according to Phase 2 6.2.1 specifications.
-2. **Offline Nature:** This is an offline counterfactual simulation and does not measure live online user behavior or external provider outages.
-3. **No Retraining or Tuning:** The model was evaluated without post-hoc optimization or threshold tuning.
-4. **Safety Verification:** All decisions adhered strictly to retry limits (\`RETRY_LIMIT = 2\`), duplicate execution guards, and alternate-method constraints.
-`;
+  return lines.join('\n');
 }
 
 export function runRuleVsMlEvaluation({ rootDirectory }) {
