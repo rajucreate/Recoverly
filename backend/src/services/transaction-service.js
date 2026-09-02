@@ -80,7 +80,11 @@ export class TransactionService {
           transaction_status: 'FAILED'
         };
 
+        const startTime = performance.now();
         const decision = this.decisionPolicy.decide(predictionContext);
+        const elapsed = performance.now() - startTime;
+        const decisionLatencyMs = Number(Math.max(0, elapsed).toFixed(3));
+
         recoveryAction = await new RecoveryActionRepository(repository.prisma).create({
           transactionId,
           attemptId: attempt.id,
@@ -96,7 +100,8 @@ export class TransactionService {
             transaction_id: transactionId,
             attempt_id: attempt.id,
             recovery_action_id: recoveryAction.id
-          }
+          },
+          decisionLatencyMs
         });
 
         if (this.auditService) {

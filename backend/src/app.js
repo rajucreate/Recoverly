@@ -9,6 +9,7 @@ import { createTransactionRouter } from './routes/transaction-routes.js';
 import { TransactionService } from './services/transaction-service.js';
 import { RecoveryExecutionService } from './services/recovery-execution-service.js';
 import { SimulatedPaymentProvider } from './providers/simulated-payment-provider.js';
+import { RecoveryPredictionService } from './intelligence/recovery-prediction-service.js';
 import { RecoveryDecisionAuditService } from './intelligence/recovery-decision-audit-service.js';
 import { RecoveryFeedbackService } from './intelligence/recovery-feedback-service.js';
 import { RecoveryAnalyticsService } from './intelligence/recovery-analytics-service.js';
@@ -26,10 +27,13 @@ export function createApp({
 } = {}) {
   const audit = auditService ?? new RecoveryDecisionAuditService();
   const feedback = feedbackService ?? new RecoveryFeedbackService({ auditService: audit });
+  const predictor = predictionService !== undefined
+    ? predictionService
+    : (decisionPolicy ? null : new RecoveryPredictionService());
   const service = transactionService ?? new TransactionService(
     new TransactionRepository(prisma),
     undefined,
-    predictionService,
+    predictor,
     decisionPolicy,
     audit
   );
@@ -44,6 +48,11 @@ export function createApp({
   });
   const app = express();
   app.disable('x-powered-by');
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    next();
+  });
   app.use(cors({
     origin: config.frontendOrigin,
     methods: ['GET', 'POST', 'OPTIONS'],

@@ -50,6 +50,7 @@ export class RecoveryAnalyticsService {
     this.feedbackService = feedbackService;
     this.auditService = auditService;
     this.benchmarkPath = benchmarkPath || DEFAULT_BENCHMARK_PATH;
+    this.cachedBenchmark = undefined;
   }
 
   async getOperationalMetrics() {
@@ -372,14 +373,19 @@ export class RecoveryAnalyticsService {
   }
 
   getBenchmarkMetrics() {
+    if (this.cachedBenchmark !== undefined) {
+      return this.cachedBenchmark;
+    }
     try {
       if (fs.existsSync(this.benchmarkPath)) {
         const fileContent = fs.readFileSync(this.benchmarkPath, 'utf8');
-        return JSON.parse(fileContent);
+        this.cachedBenchmark = JSON.parse(fileContent);
+        return this.cachedBenchmark;
       }
     } catch {
       // Return null gracefully if benchmark file is unavailable
     }
+    this.cachedBenchmark = null;
     return null;
   }
 

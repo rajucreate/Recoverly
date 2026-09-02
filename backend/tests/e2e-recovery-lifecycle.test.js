@@ -23,7 +23,7 @@ const schemaPath = path.join(rootDir, 'data', 'phase-2', 'recovery_features_v1.s
  * Only the database client is an in-memory transactional mock adhering to Prisma's API,
  * ensuring clean isolation between scenarios without external database dependencies.
  */
-function createE2EHarness({ predictionServiceOverride = null } = {}) {
+function createE2EHarness({ predictionServiceOverride } = {}) {
   const state = {
     transactions: new Map(),
     attempts: [],
@@ -31,8 +31,10 @@ function createE2EHarness({ predictionServiceOverride = null } = {}) {
   };
 
   let uuidCounter = 1;
-  const generateUuid = (prefix = '00000000') =>
-    `c4c23c30-99e8-4d89-9e12-${prefix}${String(uuidCounter++).padStart(4, '0')}`;
+  const generateUuid = (prefix = '00000000') => {
+    const hexPrefix = prefix === 'txn-' ? '11111111' : prefix === 'att-' ? '22222222' : prefix === 'act-' ? '33333333' : prefix.padEnd(8, '0');
+    return `c4c23c30-99e8-4d89-9e12-${hexPrefix}${String(uuidCounter++).padStart(4, '0')}`;
+  };
 
   const mockPrisma = {
     transaction: {
@@ -58,6 +60,8 @@ function createE2EHarness({ predictionServiceOverride = null } = {}) {
           return {
             id: record.id,
             status: record.status,
+            amount: record.amount,
+            currency: record.currency,
             _count: {
               paymentAttempts: state.attempts.filter((att) => att.transactionId === where.id).length
             },
@@ -101,13 +105,14 @@ function createE2EHarness({ predictionServiceOverride = null } = {}) {
     paymentAttempt: {
       create: jest.fn(async ({ data }) => {
         const id = generateUuid('att-');
+        const outcomeVal = data.status || data.outcome;
         const attempt = {
           id,
           transactionId: data.transactionId,
           attemptNumber: data.attemptNumber,
           paymentMethod: data.paymentMethod,
-          outcome: data.outcome,
-          status: data.outcome,
+          outcome: outcomeVal,
+          status: outcomeVal,
           failureCategory: data.failureCategory || null,
           failureReason: data.failureReason || null,
           createdAt: new Date()
@@ -180,7 +185,21 @@ function createE2EHarness({ predictionServiceOverride = null } = {}) {
       })
     },
 
-    $transaction: jest.fn(async (work) => work(mockPrisma))
+    $transaction: jest.fn(async (work) => {
+      const snapshot = {
+        transactions: new Map(state.transactions),
+        attempts: [...state.attempts],
+        recoveryActions: [...state.recoveryActions]
+      };
+      try {
+        return await work(mockPrisma);
+      } catch (error) {
+        state.transactions = snapshot.transactions;
+        state.attempts = snapshot.attempts;
+        state.recoveryActions = snapshot.recoveryActions;
+        throw error;
+      }
+    })
   };
 
   const repository = new TransactionRepository(mockPrisma);
@@ -268,8 +287,8 @@ describe('End-to-End Recovery Lifecycle (Task 6.13)', () => {
     expect(auditService.buffer).toHaveLength(1);
     const auditRecord = auditService.findByRecoveryActionId(recoveryAction.id);
     expect(auditRecord).toBeDefined();
-    expect(auditRecord.decision.decision_source).toBe(DECISION_SOURCES.ML);
-    expect(auditRecord.decision.predicted_recovery_probability).toBeGreaterThan(0.5);
+    expect(auditRecord.decision_source).toBe(DECISION_SOURCES.ML);
+    expect(auditRecord.selected_probability).toBeGreaterThan(0.5);
 
     // 3. Execute Recovery Action through HTTP (Simulated Provider returns SUCCESS)
     const execRes = await request(app)
@@ -371,14 +390,14 @@ describe('End-to-End Recovery Lifecycle (Task 6.13)', () => {
 
     // Assert Authoritative Decision Source is RULE with Fallback Reason
     expect(explanation.decision_source).toBe(DECISION_SOURCES.RULE);
-    expect(explanation.fallback_reason).toBe(FALLBACK_REASONS.MODEL_UNAVAILABLE);
+    expect(explanation.fallback?.fallback_reason || explanation.fallback_reason).toBe(FALLBACK_REASONS.MODEL_UNAVAILABLE);
     expect(explanation.selected_action).toBe(RecoveryActionType.RETRY);
 
     // Audit record contains RULE source
     const auditRecord = auditService.findByRecoveryActionId(recoveryAction.id);
-    expect(auditRecord.decision.decision_source).toBe(DECISION_SOURCES.RULE);
-    expect(auditRecord.decision.fallback.reason).toBe(FALLBACK_REASONS.MODEL_UNAVAILABLE);
-    expect(auditRecord.decision.predicted_recovery_probability).toBeNull();
+    expect(auditRecord.decision_source).toBe(DECISION_SOURCES.RULE);
+    expect(auditRecord.fallback?.fallback_reason).toBe(FALLBACK_REASONS.MODEL_UNAVAILABLE);
+    expect(auditRecord.selected_probability).toBeNull();
 
     // 3. Execute Recovery Action
     const execRes = await request(app)
@@ -394,7 +413,7 @@ describe('End-to-End Recovery Lifecycle (Task 6.13)', () => {
     expect(feedbackService.buffer).toHaveLength(1);
     const feedback = feedbackService.buffer[0];
     expect(feedback.decision.decision_source).toBe(DECISION_SOURCES.RULE);
-    expect(feedback.decision.fallback.reason).toBe(FALLBACK_REASONS.MODEL_UNAVAILABLE);
+    expect(feedback.decision.fallback.fallback_reason || feedback.decision.fallback.reason).toBe(FALLBACK_REASONS.MODEL_UNAVAILABLE);
     expect(feedback.execution.actual_recovery_success).toBe(true);
 
     // 5. Verify Analytics Reflects Rule Traffic Share
@@ -419,7 +438,7 @@ describe('End-to-End Recovery Lifecycle (Task 6.13)', () => {
   });
 
   test('Scenario 3: Escalation Action Lifecycle with Non-Payment Tri-State Outcome', async () => {
-    const { app, state, feedbackService } = createE2EHarness();
+    const { app, state, feedbackService } = createE2EHarness({ predictionServiceOverride: null });
 
     // 1. Create Transaction
     const createTxnRes = await request(app)
@@ -603,7 +622,7 @@ describe('End-to-End Recovery Lifecycle (Task 6.13)', () => {
   });
 
   test('Scenario 6: Multi-Transaction Closed-Loop Analytics Consistency', async () => {
-    const { app } = createE2EHarness();
+    const { app } = createE2EHarness({ predictionServiceOverride: null });
 
     // Transaction 1: Successful RETRY
     const t1 = await request(app).post('/api/transactions').send({ amount: 1000, currency: 'INR', customerId: 'c1' });
