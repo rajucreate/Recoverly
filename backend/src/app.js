@@ -43,13 +43,14 @@ export function createApp({
     auditService: audit
   });
   const app = express();
+  app.disable('x-powered-by');
   app.use(cors({
     origin: config.frontendOrigin,
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     optionsSuccessStatus: 204
   }));
-  app.use(express.json());
+  app.use(express.json({ limit: '100kb' }));
   app.use('/api/transactions', createTransactionRouter(new TransactionController(service, executionService, feedback)));
   app.use('/api/analytics', createAnalyticsRouter(new AnalyticsController(analytics)));
   app.use(notFoundHandler);
