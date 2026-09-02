@@ -56,3 +56,7 @@ export function executeRecovery(transactionId, data) {
     body: JSON.stringify(data),
   });
 }
+
+export function getRecoveryAnalytics() {
+  return request('/analytics/recovery');
+}
