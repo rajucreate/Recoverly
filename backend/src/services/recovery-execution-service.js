@@ -2,13 +2,18 @@ import { toPaymentAttemptResponse, toRecoveryActionResponse } from '../dto/trans
 import { BusinessRuleError, NotFoundError } from '../errors/app-error.js';
 import { RecoveryActionRepository } from '../repositories/recovery-action-repository.js';
 import { TransactionStatus } from '../enums/transaction-status.js';
+import { adaptPaymentProvider, normalizeProviderResponse } from '../providers/payment-provider.js';
 
 const ATTEMPT_ACTIONS = new Set(['RETRY', 'ALTERNATE_METHOD']);
 
 export class RecoveryExecutionService {
   constructor(transactionRepository, paymentProvider) {
     this.transactionRepository = transactionRepository;
-    this.paymentProvider = paymentProvider;
+    this.paymentProvider = adaptPaymentProvider(paymentProvider);
+  }
+
+  get providerId() {
+    return this.paymentProvider.providerId;
   }
 
   async execute(transactionId, data) {
@@ -34,15 +39,18 @@ export class RecoveryExecutionService {
       }
 
       const paymentMethod = this.resolvePaymentMethod(action, data.paymentMethod);
-      if (!data.providerOutcome) {
-        throw new BusinessRuleError('providerOutcome is required for payment recovery execution', { recoveryActionId: action.id });
-      }
-      const providerResult = await this.paymentProvider.execute({
+      const providerRequest = {
         transactionId,
         recoveryActionId: action.id,
         paymentMethod,
-        providerOutcome: data.providerOutcome
-      });
+        ...(data.providerRequest ? { providerRequest: data.providerRequest } : {}),
+        idempotencyKey: `recovery:${action.id}`
+      };
+      const providerResult = normalizeProviderResponse(
+        await this.paymentProvider.executePayment(providerRequest),
+        this.paymentProvider.providerId,
+        providerRequest
+      );
       const attempt = await transactionRepository.createPaymentAttempt({
         transactionId,
         paymentMethod,

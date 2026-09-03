@@ -3,10 +3,11 @@ import { validateCreatePaymentAttempt, validateCreateTransaction, validateRecove
 import { RecoveryFeedbackService } from '../intelligence/recovery-feedback-service.js';
 
 export class TransactionController {
-  constructor(transactionService, recoveryExecutionService, feedbackService = new RecoveryFeedbackService()) {
+  constructor(transactionService, recoveryExecutionService, feedbackService = new RecoveryFeedbackService(), providerRequestAdapter = (input) => input) {
     this.transactionService = transactionService;
     this.recoveryExecutionService = recoveryExecutionService;
     this.feedbackService = feedbackService;
+    this.providerRequestAdapter = providerRequestAdapter;
   }
 
   create = async (req, res) => {
@@ -31,7 +32,8 @@ export class TransactionController {
   };
 
   executeRecovery = async (req, res) => {
-    const result = await this.recoveryExecutionService.execute(req.params.transactionId, validateRecoveryExecution(req.body));
+    const executionInput = this.providerRequestAdapter(validateRecoveryExecution(req.body));
+    const result = await this.recoveryExecutionService.execute(req.params.transactionId, executionInput);
 
     if (this.feedbackService && result?.recoveryAction) {
       try {

@@ -8,7 +8,8 @@ import { TransactionRepository } from './repositories/transaction-repository.js'
 import { createTransactionRouter } from './routes/transaction-routes.js';
 import { TransactionService } from './services/transaction-service.js';
 import { RecoveryExecutionService } from './services/recovery-execution-service.js';
-import { SimulatedPaymentProvider } from './providers/simulated-payment-provider.js';
+import { createPaymentProvider } from './providers/create-payment-provider.js';
+import { createProviderRequestAdapter } from './providers/provider-request-adapter.js';
 import { RecoveryPredictionService } from './intelligence/recovery-prediction-service.js';
 import { RecoveryDecisionAuditService } from './intelligence/recovery-decision-audit-service.js';
 import { RecoveryFeedbackService } from './intelligence/recovery-feedback-service.js';
@@ -19,6 +20,7 @@ import { createAnalyticsRouter } from './routes/analytics-routes.js';
 export function createApp({
   transactionService,
   recoveryExecutionService,
+  paymentProvider,
   predictionService,
   decisionPolicy,
   auditService,
@@ -43,8 +45,9 @@ export function createApp({
   );
   const executionService = recoveryExecutionService ?? new RecoveryExecutionService(
     new TransactionRepository(prisma),
-    new SimulatedPaymentProvider()
+    paymentProvider ?? createPaymentProvider()
   );
+  const providerRequestAdapter = createProviderRequestAdapter(paymentProvider?.providerId ?? executionService.providerId);
   const analytics = analyticsService ?? new RecoveryAnalyticsService({
     prisma,
     feedbackService: feedback,
@@ -64,7 +67,7 @@ export function createApp({
     optionsSuccessStatus: 204
   }));
   app.use(express.json({ limit: '100kb' }));
-  app.use('/api/transactions', createTransactionRouter(new TransactionController(service, executionService, feedback)));
+  app.use('/api/transactions', createTransactionRouter(new TransactionController(service, executionService, feedback, providerRequestAdapter)));
   app.use('/api/analytics', createAnalyticsRouter(new AnalyticsController(analytics)));
   app.use(notFoundHandler);
   app.use(errorHandler);
