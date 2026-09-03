@@ -28,29 +28,48 @@ export class RecoveryWorker {
       if (!job) return null;
       try {
         const result = await this.executionService.executeQueuedJob(job);
-        if (result.attempt?.status === 'FAILED') {
-          const error = new Error(result.attempt.failureReason ?? 'Provider execution failed');
-          error.code = 'PROVIDER_EXECUTION_FAILED';
-          error.category = result.attempt.failureCategory ?? null;
-          if (job.claimVersion === undefined) await this.queue.fail(job.jobId, error);
-          else await this.queue.fail(job.jobId, error, job.claimVersion);
-        } else {
-          if (job.claimVersion === undefined) await this.queue.acknowledge(job.jobId);
-          else await this.queue.acknowledge(job.jobId, job.claimVersion);
-        }
+        await this.completeJob(job, result);
         await this.recordFeedback(job, result);
         return result;
       } catch (error) {
-        if (this.executionService.markQueuedAttemptFailed) {
-          try { await this.executionService.markQueuedAttemptFailed(job, error); } catch { /* Preserve the job failure path. */ }
+        if (error.providerExecutionFailure !== true) {
+          if (job.claimVersion === undefined) await this.queue.fail(job.jobId, error);
+          else await this.queue.fail(job.jobId, error, job.claimVersion);
+          return null;
         }
-        if (job.claimVersion === undefined) await this.queue.fail(job.jobId, error);
-        else await this.queue.fail(job.jobId, error, job.claimVersion);
-        return null;
+        if (typeof this.executionService.persistProviderFailure !== 'function') {
+          if (job.claimVersion === undefined) await this.queue.fail(job.jobId, error);
+          else await this.queue.fail(job.jobId, error, job.claimVersion);
+          return null;
+        }
+        try {
+          const result = await this.executionService.persistProviderFailure(job, error);
+          await this.completeJob(job, result);
+          await this.recordFeedback(job, result);
+          return result;
+        } catch (persistenceError) {
+          if (job.claimVersion === undefined) await this.queue.fail(job.jobId, persistenceError);
+          else await this.queue.fail(job.jobId, persistenceError, job.claimVersion);
+          return null;
+        }
       }
     } finally {
       this.processing = false;
     }
+  }
+
+  async completeJob(job, result) {
+    if (result.jobStatus === 'RETRY_PENDING' || result.jobStatus === 'DEAD_LETTER') return;
+    if (result.attempt?.status === 'FAILED') {
+      const error = new Error(result.attempt.failureReason ?? 'Provider execution failed');
+      error.code = 'PROVIDER_EXECUTION_FAILED';
+      error.category = result.attempt.failureCategory ?? null;
+      if (job.claimVersion === undefined) await this.queue.fail(job.jobId, error);
+      else await this.queue.fail(job.jobId, error, job.claimVersion);
+      return;
+    }
+    if (job.claimVersion === undefined) await this.queue.acknowledge(job.jobId);
+    else await this.queue.acknowledge(job.jobId, job.claimVersion);
   }
 
   async recordFeedback(job, result) {

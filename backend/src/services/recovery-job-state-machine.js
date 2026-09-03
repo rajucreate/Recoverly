@@ -5,7 +5,8 @@ const VALID_TRANSITIONS = Object.freeze({
   [RecoveryJobStatus.PROCESSING]: new Set([
     RecoveryJobStatus.SUCCEEDED,
     RecoveryJobStatus.FAILED,
-    RecoveryJobStatus.RETRY_PENDING
+    RecoveryJobStatus.RETRY_PENDING,
+    RecoveryJobStatus.DEAD_LETTER
   ]),
   [RecoveryJobStatus.RETRY_PENDING]: new Set([
     RecoveryJobStatus.QUEUED,

@@ -1,0 +1,16 @@
+warning: in the working copy of 'backend/src/app.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'data/phase-2/models/rule-vs-ml-evaluation.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/phase-2/6.6-rule-vs-ml-evaluation.md', LF will be replaced by CRLF the next time Git touches it
+ backend/src/app.js                                 |  32 [32m++++++[m[31m-[m
+ backend/src/config/env.js                          |   9 [32m+[m[31m-[m
+ backend/src/queue/postgres-recovery-job-queue.js   |  17 [32m+++[m[31m-[m
+ .../src/repositories/recovery-job-repository.js    |  56 [32m++++++++++[m[31m-[m
+ backend/src/server.js                              |   2 [32m+[m
+ backend/src/services/recovery-execution-service.js | 102 [32m+++++++++++++++++[m[31m----[m
+ backend/src/services/recovery-job-service.js       |   4 [32m+[m[31m-[m
+ backend/src/services/recovery-job-state-machine.js |   3 [32m+[m[31m-[m
+ backend/src/workers/recovery-worker.js             |  49 [32m+++++++[m[31m---[m
+ backend/tests/recovery-job.test.js                 |  26 [32m++++++[m
+ data/phase-2/models/rule-vs-ml-evaluation.json     |   2 [32m+[m[31m-[m
+ docs/phase-2/6.6-rule-vs-ml-evaluation.md          |   2 [32m+[m[31m-[m
+ 12 files changed, 257 insertions(+), 47 deletions(-)

@@ -19,6 +19,7 @@ import { createAnalyticsRouter } from './routes/analytics-routes.js';
 import { RecoveryJobService } from './services/recovery-job-service.js';
 import { PostgresRecoveryJobQueue } from './queue/postgres-recovery-job-queue.js';
 import { RecoveryWorker } from './workers/recovery-worker.js';
+import { RecoveryLeaseReaper } from './workers/recovery-lease-reaper.js';
 import { RecoveryJobController } from './controllers/recovery-job-controller.js';
 import { createRecoveryJobRouter } from './routes/recovery-job-routes.js';
 
@@ -33,7 +34,8 @@ export function createApp({
   analyticsService,
   recoveryJobService,
   recoveryJobQueue,
-  recoveryWorker
+  recoveryWorker,
+  recoveryLeaseReaper
 } = {}) {
   const useDurableDefaults = !transactionService && !recoveryExecutionService && !auditService && !feedbackService;
   const audit = auditService ?? new RecoveryDecisionAuditService({ prisma: useDurableDefaults ? prisma : null });
@@ -53,7 +55,14 @@ export function createApp({
   );
   const executionService = recoveryExecutionService ?? new RecoveryExecutionService(
     new TransactionRepository(prisma),
-    paymentProvider ?? createPaymentProvider()
+    paymentProvider ?? createPaymentProvider(),
+    {
+      retryConfig: {
+        baseDelayMs: config.recoveryRetryBaseDelayMs,
+        maxDelayMs: config.recoveryRetryMaxDelayMs,
+        jitterRatio: config.recoveryRetryJitterRatio
+      }
+    }
   );
   const providerRequestAdapter = createProviderRequestAdapter(paymentProvider?.providerId ?? executionService.providerId);
   const analytics = analyticsService ?? new RecoveryAnalyticsService({
@@ -61,9 +70,21 @@ export function createApp({
     feedbackService: feedback,
     auditService: audit
   });
-  const jobService = recoveryJobService ?? new RecoveryJobService(new TransactionRepository(prisma));
-  const jobQueue = recoveryJobQueue ?? new PostgresRecoveryJobQueue(prisma);
-  const worker = recoveryWorker ?? new RecoveryWorker(jobQueue, executionService, feedback);
+  const jobService = recoveryJobService ?? new RecoveryJobService(new TransactionRepository(prisma), {
+    maxAttempts: config.recoveryMaxAttempts
+  });
+  const jobQueue = recoveryJobQueue ?? new PostgresRecoveryJobQueue(prisma, {
+    leaseDurationMs: config.recoveryLeaseDurationMs,
+    batchSize: config.recoveryBatchSize
+  });
+  const worker = recoveryWorker ?? new RecoveryWorker(jobQueue, executionService, feedback, {
+    pollIntervalMs: config.recoveryPollingIntervalMs,
+    batchSize: config.recoveryBatchSize
+  });
+  const reaper = recoveryLeaseReaper ?? new RecoveryLeaseReaper(jobQueue, {
+    pollingIntervalMs: config.recoveryPollingIntervalMs,
+    batchSize: config.recoveryBatchSize
+  });
   const app = express();
   app.disable('x-powered-by');
   app.use((_req, res, next) => {
@@ -84,5 +105,6 @@ export function createApp({
   app.use(notFoundHandler);
   app.use(errorHandler);
   app.locals.recoveryWorker = worker;
+  app.locals.recoveryLeaseReaper = reaper;
   return app;
 }

@@ -185,6 +185,32 @@ describe('RecoveryWorker', () => {
     expect(queue.acknowledge).not.toHaveBeenCalled();
     expect(feedbackService.recordFeedback).toHaveBeenCalled();
   });
+
+  test('does not classify result persistence failure as a provider exception', async () => {
+    const job = makeJob({ status: RecoveryJobStatus.PROCESSING });
+    const persistenceError = new Error('result persistence failed');
+    const provider = {
+      providerId: 'test-provider',
+      executePayment: jest.fn(async () => ({ outcome: 'SUCCESS' }))
+    };
+    const repository = {
+      executeInTransaction: jest.fn(async () => { throw persistenceError; })
+    };
+    const executionService = new RecoveryExecutionService(repository, provider);
+    const persistProviderFailure = jest.spyOn(executionService, 'persistProviderFailure');
+    const queue = {
+      claimNext: jest.fn(async () => job),
+      acknowledge: jest.fn(),
+      fail: jest.fn()
+    };
+    const worker = new RecoveryWorker(queue, executionService, null, { workerId: 'worker-1' });
+
+    await expect(worker.processNext()).resolves.toBeNull();
+    expect(provider.executePayment).toHaveBeenCalledTimes(1);
+    expect(persistenceError.providerExecutionFailure).not.toBe(true);
+    expect(persistProviderFailure).not.toHaveBeenCalled();
+    expect(queue.fail).toHaveBeenCalledWith(job.jobId, persistenceError, job.claimVersion);
+  });
 });
 
 describe('RecoveryExecutionService async boundary', () => {

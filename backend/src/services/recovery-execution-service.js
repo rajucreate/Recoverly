@@ -5,13 +5,19 @@ import { TransactionStatus } from '../enums/transaction-status.js';
 import { adaptPaymentProvider, normalizeProviderResponse } from '../providers/payment-provider.js';
 import { RecoveryJobAttemptStatus } from '../enums/recovery-job-attempt-status.js';
 import { RecoveryJobAttemptRepository } from '../repositories/recovery-job-attempt-repository.js';
+import { RecoveryJobRepository } from '../repositories/recovery-job-repository.js';
+import { calculateRetryDelay } from './recovery-backoff.js';
+import { isRetryable } from './recovery-retry-policy.js';
+import { ProviderErrorCategory, toBusinessFailureCategory } from '../providers/provider-errors.js';
 
 const ATTEMPT_ACTIONS = new Set(['RETRY', 'ALTERNATE_METHOD']);
 
 export class RecoveryExecutionService {
-  constructor(transactionRepository, paymentProvider) {
+  constructor(transactionRepository, paymentProvider, { retryConfig = {}, now = () => new Date() } = {}) {
     this.transactionRepository = transactionRepository;
     this.paymentProvider = adaptPaymentProvider(paymentProvider);
+    this.retryConfig = retryConfig;
+    this.now = now;
   }
 
   get providerId() {
@@ -65,28 +71,55 @@ export class RecoveryExecutionService {
   }
 
   async executeQueuedJob(job) {
-    const providerResult = normalizeProviderResponse(
-      await this.paymentProvider.executePayment(job.request),
-      this.paymentProvider.providerId,
-      job.request
-    );
+    let providerResult;
+    try {
+      providerResult = normalizeProviderResponse(
+        await this.paymentProvider.executePayment(job.request),
+        this.paymentProvider.providerId,
+        job.request
+      );
+    } catch (error) {
+      const providerError = error instanceof Error ? error : new Error(String(error));
+      providerError.providerExecutionFailure = true;
+      throw providerError;
+    }
     return this.persistProviderResult({
+      jobId: job.jobId,
       transactionId: job.transactionId,
       recoveryActionId: job.recoveryActionId,
       paymentMethod: job.request.paymentMethod,
       executionAttemptId: job.executionAttemptId,
-      claimVersion: job.claimVersion
+      claimVersion: job.claimVersion,
+      attemptCount: job.attemptCount,
+      maxAttempts: job.maxAttempts
     }, providerResult);
   }
 
-  async markQueuedAttemptFailed(job, error) {
-    if (!job.executionAttemptId) return;
-    await this.transactionRepository.executeInTransaction(async (transactionRepository) => {
-      await new RecoveryJobAttemptRepository(transactionRepository.prisma).updateFailed(
-        job.executionAttemptId,
-        job.claimVersion,
-        error instanceof Error ? error.message : String(error)
-      );
+  async persistProviderFailure(job, error) {
+    const category = error?.category ?? ProviderErrorCategory.UNKNOWN_PROVIDER_ERROR;
+    return this.persistProviderResult({
+      jobId: job.jobId,
+      transactionId: job.transactionId,
+      recoveryActionId: job.recoveryActionId,
+      paymentMethod: job.request.paymentMethod,
+      executionAttemptId: job.executionAttemptId,
+      claimVersion: job.claimVersion,
+      attemptCount: job.attemptCount,
+      maxAttempts: job.maxAttempts
+    }, {
+      outcome: 'FAILED',
+      failureCategory: error?.failureCategory ?? toBusinessFailureCategory(category),
+      failureReason: error instanceof Error ? error.message : String(error),
+      providerId: error?.providerId ?? this.paymentProvider.providerId,
+      providerRequestId: error?.providerRequestId ?? null,
+      providerPaymentId: error?.providerPaymentId ?? null,
+      retryable: isRetryable(error),
+      pending: false,
+      idempotencyKey: job.request.idempotencyKey,
+      metadata: {
+        providerCode: error?.providerCode ?? null,
+        providerStatus: error?.providerStatus ?? null
+      }
     });
   }
 
@@ -113,8 +146,11 @@ export class RecoveryExecutionService {
         attemptNumber: transaction._count.paymentAttempts + 1
       });
       await transactionRepository.updateStatus(transactionId, providerResult.outcome === 'SUCCESS' ? TransactionStatus.SUCCESS : TransactionStatus.FAILED);
-      const completedStatus = providerResult.outcome === 'SUCCESS' ? 'SUCCESS' : 'FAILED';
-      await this.transitionAction(recoveryActionRepository, recoveryActionId, 'RECOMMENDED', completedStatus);
+      const isQueuedExecution = !!execution.executionAttemptId;
+      const retryableFailure = isQueuedExecution && providerResult.outcome === 'FAILED' && providerResult.retryable === true;
+      const attemptsRemain = retryableFailure && execution.attemptCount < (execution.maxAttempts ?? 3);
+      const completedStatus = providerResult.outcome === 'SUCCESS' || !retryableFailure || !attemptsRemain ? (providerResult.outcome === 'SUCCESS' ? 'SUCCESS' : 'FAILED') : null;
+      if (completedStatus) await this.transitionAction(recoveryActionRepository, recoveryActionId, 'RECOMMENDED', completedStatus);
       if (execution.executionAttemptId) {
         const attemptUpdate = await new RecoveryJobAttemptRepository(transactionRepository.prisma).updateCompleted(
           execution.executionAttemptId,
@@ -133,8 +169,38 @@ export class RecoveryExecutionService {
           throw new BusinessRuleError('Recovery job attempt claim is no longer current', { recoveryActionId, claimVersion: execution.claimVersion });
         }
       }
+      let jobStatus = null;
+      if (isQueuedExecution && providerResult.outcome === 'FAILED' && retryableFailure) {
+        const failureDetails = {
+          lastFailureCategory: providerResult.failureCategory,
+          lastFailureReason: providerResult.failureReason
+        };
+        if (attemptsRemain) {
+          const delay = calculateRetryDelay(execution.attemptCount, this.retryConfig);
+          const retryAt = new Date(this.now().getTime() + delay);
+          const scheduled = await new RecoveryJobRepository(transactionRepository.prisma).updateStatus(
+            execution.jobId,
+            'PROCESSING',
+            'RETRY_PENDING',
+            { availableAt: retryAt, leaseUntil: null, ...failureDetails },
+            execution.claimVersion
+          );
+          if (scheduled.count !== 1) throw new BusinessRuleError('Recovery job claim is no longer current', { recoveryActionId, claimVersion: execution.claimVersion });
+          jobStatus = 'RETRY_PENDING';
+        } else {
+          const deadLettered = await new RecoveryJobRepository(transactionRepository.prisma).updateStatus(
+            execution.jobId,
+            'PROCESSING',
+            'DEAD_LETTER',
+            { completedAt: this.now(), leaseUntil: null, deadLetteredAt: this.now(), ...failureDetails },
+            execution.claimVersion
+          );
+          if (deadLettered.count !== 1) throw new BusinessRuleError('Recovery job claim is no longer current', { recoveryActionId, claimVersion: execution.claimVersion });
+          jobStatus = 'DEAD_LETTER';
+        }
+      }
       const completedAction = await recoveryActionRepository.findByIdForTransaction(recoveryActionId, transactionId);
-      return { attempt: toPaymentAttemptResponse(attempt), recoveryAction: toRecoveryActionResponse(completedAction) };
+      return { attempt: toPaymentAttemptResponse(attempt), recoveryAction: toRecoveryActionResponse(completedAction), jobStatus };
     });
   }
 

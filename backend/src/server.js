@@ -5,9 +5,11 @@ import { createApp } from './app.js';
 const app = createApp();
 const server = app.listen(config.port, () => console.log(`Server listening on port ${config.port}`));
 app.locals.recoveryWorker.start();
+app.locals.recoveryLeaseReaper.start();
 
 async function shutdown() {
   app.locals.recoveryWorker.stop();
+  app.locals.recoveryLeaseReaper.stop();
   server.close(async () => {
     await prisma.$disconnect();
     process.exit(0);

@@ -8,8 +8,9 @@ import { TransactionStatus } from '../enums/transaction-status.js';
 const PROVIDER_ACTIONS = new Set([RecoveryActionType.RETRY, RecoveryActionType.ALTERNATE_METHOD]);
 
 export class RecoveryJobService {
-  constructor(transactionRepository) {
+  constructor(transactionRepository, { maxAttempts = 3 } = {}) {
     this.transactionRepository = transactionRepository;
+    this.maxAttempts = maxAttempts;
   }
 
   async createJob(transactionId, data) {
@@ -52,6 +53,7 @@ export class RecoveryJobService {
           providerRequest: data.providerRequest ?? {},
           idempotencyKey: `recovery:${action.id}`
         },
+        maxAttempts: this.maxAttempts,
         idempotencyKey: `recovery-job:${action.id}`
       });
       });
