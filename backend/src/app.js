@@ -25,8 +25,12 @@ export function createApp({
   feedbackService,
   analyticsService
 } = {}) {
-  const audit = auditService ?? new RecoveryDecisionAuditService();
-  const feedback = feedbackService ?? new RecoveryFeedbackService({ auditService: audit });
+  const useDurableDefaults = !transactionService && !recoveryExecutionService && !auditService && !feedbackService;
+  const audit = auditService ?? new RecoveryDecisionAuditService({ prisma: useDurableDefaults ? prisma : null });
+  const feedback = feedbackService ?? new RecoveryFeedbackService({
+    auditService: audit,
+    prisma: useDurableDefaults ? prisma : null
+  });
   const predictor = predictionService !== undefined
     ? predictionService
     : (decisionPolicy ? null : new RecoveryPredictionService());

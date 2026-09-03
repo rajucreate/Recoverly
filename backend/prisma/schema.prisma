@@ -17,6 +17,8 @@ model Transaction {
   updatedAt       DateTime         @updatedAt
   paymentAttempts PaymentAttempt[]
   recoveryActions RecoveryAction[]
+  decisionAudits  RecoveryDecisionAudit[]
+  feedbackRecords RecoveryFeedback[]
 
   @@index([customerId])
 }
@@ -32,6 +34,9 @@ model PaymentAttempt {
   createdAt       DateTime      @default(now())
   transaction     Transaction   @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   recoveryAction  RecoveryAction?
+  decisionAudits  RecoveryDecisionAudit[]
+  feedbackTriggers RecoveryFeedback[] @relation("FeedbackTriggerAttempt")
+  feedbackExecutions RecoveryFeedback[] @relation("FeedbackExecutionAttempt")
 
   @@index([transactionId])
   @@unique([transactionId, attemptNumber])
@@ -47,9 +52,77 @@ model RecoveryAction {
   createdAt     DateTime             @default(now())
   transaction   Transaction          @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   attempt       PaymentAttempt       @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  decisionAudits RecoveryDecisionAudit[]
+  feedbackRecords RecoveryFeedback[]
 
   @@index([transactionId])
   @@unique([attemptId])
+}
+
+model RecoveryDecisionAudit {
+  id                    String             @id @default(uuid()) @db.Uuid
+  auditId               String             @unique @db.VarChar(255)
+  transactionId         String             @db.Uuid
+  attemptId             String             @db.Uuid
+  recoveryActionId      String?            @db.Uuid
+  decisionTimestamp     DateTime
+  selectedAction        RecoveryActionType
+  decisionSource        DecisionSource
+  decisionReason        String
+  selectedProbability   Decimal?           @db.Decimal(8, 6)
+  context               Json
+  candidates            Json
+  rejectedCandidates    Json
+  fallback              Json
+  versions              Json
+  performance           Json
+  explanation           Json
+  explanationSchemaVersion String          @db.VarChar(50)
+  createdAt             DateTime            @default(now())
+  transaction           Transaction         @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  attempt               PaymentAttempt     @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  recoveryAction        RecoveryAction?    @relation(fields: [recoveryActionId], references: [id], onDelete: SetNull)
+
+  @@index([transactionId, decisionTimestamp])
+  @@index([attemptId])
+  @@index([recoveryActionId])
+  @@index([decisionSource, decisionTimestamp])
+  @@index([selectedAction, decisionTimestamp])
+}
+
+model RecoveryFeedback {
+  id                    String                 @id @default(uuid()) @db.Uuid
+  feedbackId            String                 @unique @db.VarChar(255)
+  transactionId         String                 @db.Uuid
+  triggerAttemptId      String                 @db.Uuid
+  recoveryActionId      String?                @db.Uuid
+  executionAttemptId    String?                @db.Uuid
+  auditId               String?                @db.VarChar(255)
+  feedbackTimestamp     DateTime
+  outcomeTimestamp      DateTime
+  selectedAction        RecoveryActionType
+  decisionSource        DecisionSource
+  probability           Decimal?               @db.Decimal(8, 6)
+  modelVersion          String?                @db.VarChar(255)
+  executionOutcome      RecoveryFeedbackOutcome
+  actualRecoverySuccess Boolean?
+  context               Json
+  decisionMetadata      Json
+  executionMetadata     Json
+  versions              Json
+  deduplicationKey      String                 @unique @db.VarChar(768)
+  createdAt             DateTime               @default(now())
+  transaction           Transaction            @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  triggerAttempt        PaymentAttempt        @relation("FeedbackTriggerAttempt", fields: [triggerAttemptId], references: [id], onDelete: Cascade)
+  recoveryAction        RecoveryAction?       @relation(fields: [recoveryActionId], references: [id], onDelete: SetNull)
+  executionAttempt      PaymentAttempt?       @relation("FeedbackExecutionAttempt", fields: [executionAttemptId], references: [id], onDelete: SetNull)
+
+  @@index([transactionId, feedbackTimestamp])
+  @@index([recoveryActionId])
+  @@index([triggerAttemptId])
+  @@index([executionAttemptId])
+  @@index([decisionSource, feedbackTimestamp])
+  @@index([executionOutcome, outcomeTimestamp])
 }
 
 enum TransactionStatus {
@@ -89,4 +162,15 @@ enum RecoveryActionStatus {
   EXECUTED
   SUCCESS
   FAILED
+}
+
+enum DecisionSource {
+  ML
+  RULE
+}
+
+enum RecoveryFeedbackOutcome {
+  SUCCESS
+  FAILED
+  EXECUTED
 }

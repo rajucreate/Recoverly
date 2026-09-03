@@ -216,8 +216,16 @@ export class RecoveryAnalyticsService {
   }
 
   getModelMetrics() {
-    const feedbackRecords = this.feedbackService?.buffer ?? [];
-    const auditRecords = this.auditService?.buffer ?? [];
+    if (this.feedbackService?.repository || this.auditService?.repository) {
+      return Promise.all([
+        this.feedbackService?.repository?.findMany({ orderBy: { feedbackTimestamp: 'asc' } }) ?? [],
+        this.auditService?.repository?.findMany({ orderBy: { decisionTimestamp: 'asc' } }) ?? []
+      ]).then(([feedbackRecords, auditRecords]) => this._calculateModelMetrics(feedbackRecords, auditRecords));
+    }
+    return this._calculateModelMetrics(this.feedbackService?.buffer ?? [], this.auditService?.buffer ?? []);
+  }
+
+  _calculateModelMetrics(feedbackRecords, auditRecords) {
 
     // A. Prediction confidence (from audit records or feedback records where decision_source is ML)
     // Gather all distinct ML decisions with valid probabilities
@@ -392,7 +400,7 @@ export class RecoveryAnalyticsService {
   async getAnalyticsSummary() {
     const [operational, model, benchmark] = await Promise.all([
       this.getOperationalMetrics(),
-      Promise.resolve(this.getModelMetrics()),
+      this.getModelMetrics(),
       Promise.resolve(this.getBenchmarkMetrics())
     ]);
 

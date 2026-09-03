@@ -35,7 +35,8 @@ export class TransactionService {
   }
 
   async createPaymentAttempt(transactionId, data) {
-    return this.transactionRepository.executeInTransaction(async (repository) => {
+    let committedAuditRecord = null;
+    const result = await this.transactionRepository.executeInTransaction(async (repository) => {
       const transaction = await repository.findByIdForAttempt(transactionId);
       if (!transaction) throw new NotFoundError('Transaction', transactionId);
       if (transaction.status === TransactionStatus.SUCCESS || transaction.status === TransactionStatus.RECOVERED) {
@@ -104,16 +105,22 @@ export class TransactionService {
           decisionLatencyMs
         });
 
-        if (this.auditService) {
-          this.auditService.record(auditRecord);
-        }
-
         explanation = explainDecision({
           auditRecord
         });
+
+        if (this.auditService?.repository) {
+          await this.auditService.persist(auditRecord, explanation, repository.prisma);
+          committedAuditRecord = auditRecord;
+        } else if (this.auditService) {
+          this.auditService.record(auditRecord);
+        }
       }
 
       return { attempt: toPaymentAttemptResponse(attempt), recoveryAction, explanation };
     });
+
+    if (committedAuditRecord) this.auditService.cache(committedAuditRecord);
+    return result;
   }
 }

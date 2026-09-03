@@ -11,6 +11,7 @@ import {
   FEATURE_SCHEMA_VERSION
 } from './recovery-feature-pipeline.js';
 import { INTERACTION_MODEL_VERSION } from './candidate-model-comparison.js';
+import { RecoveryDecisionAuditRepository } from '../repositories/recovery-decision-audit-repository.js';
 
 export const AUDIT_SCHEMA_VERSION = '6.7.0';
 export const DECISION_POLICY_VERSION = '6.7.0';
@@ -206,7 +207,9 @@ export function buildDecisionAuditRecord({
 }
 
 export class RecoveryDecisionAuditService {
-  constructor({ maxBufferedRecords = 1000 } = {}) {
+  constructor({ prisma = null, repository = null, maxBufferedRecords = 1000 } = {}) {
+    this.prisma = prisma;
+    this.repository = repository ?? (prisma ? new RecoveryDecisionAuditRepository(prisma) : null);
     this.maxBufferedRecords = maxBufferedRecords;
     this.buffer = [];
   }
@@ -215,16 +218,33 @@ export class RecoveryDecisionAuditService {
     return buildDecisionAuditRecord(params);
   }
 
+  cache(record) {
+    this.buffer.push(record);
+    if (this.buffer.length > this.maxBufferedRecords) this.buffer.shift();
+    return record;
+  }
+
+  async persist(record, explanation, client = this.prisma) {
+    if (!this.repository || !client) return record;
+    await this.repository.create(record, explanation, client);
+    return record;
+  }
+
   record(params) {
     const auditRecord = params?.audit_schema_version ? params : this.createAuditRecord(params);
-    this.buffer.push(auditRecord);
-    if (this.buffer.length > this.maxBufferedRecords) {
-      this.buffer.shift();
+    if (!this.repository) {
+      return this.cache(auditRecord);
     }
-    return auditRecord;
+    return this.persist(auditRecord, params.explanation, this.prisma).then(() => this.cache(auditRecord));
   }
 
   getRecentRecords({ limit = 50, filter = null } = {}) {
+    if (this.repository) {
+      return this.repository.findMany({ orderBy: { decisionTimestamp: 'desc' }, take: limit }).then((records) => {
+        const filtered = typeof filter === 'function' ? records.filter(filter) : records;
+        return filtered.reverse();
+      });
+    }
     let records = [...this.buffer];
     if (typeof filter === 'function') {
       records = records.filter(filter);
@@ -234,6 +254,7 @@ export class RecoveryDecisionAuditService {
 
   findByRecoveryActionId(actionId, transactionId = null) {
     if (!actionId) return null;
+    if (this.repository) return this.repository.findByRecoveryActionId(actionId, transactionId);
     return this.buffer.find((record) =>
       record.correlation.recovery_action_id === actionId &&
       (!transactionId || record.correlation.transaction_id === transactionId)
@@ -242,6 +263,7 @@ export class RecoveryDecisionAuditService {
 
   findByAttemptId(attemptId, transactionId = null) {
     if (!attemptId) return null;
+    if (this.repository) return this.repository.findByAttemptId(attemptId, transactionId);
     return this.buffer.find((record) =>
       record.correlation.attempt_id === attemptId &&
       (!transactionId || record.correlation.transaction_id === transactionId)
@@ -250,10 +272,12 @@ export class RecoveryDecisionAuditService {
 
   findByTransactionId(transactionId) {
     if (!transactionId) return [];
+    if (this.repository) return this.repository.findByTransactionId(transactionId);
     return this.buffer.filter((record) => record.correlation.transaction_id === transactionId);
   }
 
   getRecordCount() {
+    if (this.repository) return this.repository.findMany({}).then((records) => records.length);
     return this.buffer.length;
   }
 

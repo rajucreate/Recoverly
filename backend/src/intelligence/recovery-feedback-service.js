@@ -14,6 +14,7 @@ import {
   DATASET_VERSION,
   SCHEMA_VERSION
 } from './recovery-dataset-generator.js';
+import { RecoveryFeedbackRepository } from '../repositories/recovery-feedback-repository.js';
 
 export const FEEDBACK_SCHEMA_VERSION = '6.10.0';
 
@@ -340,8 +341,10 @@ export function feedbackRecordToDatasetRow(feedbackRecord) {
 }
 
 export class RecoveryFeedbackService {
-  constructor({ auditService = null, maxBufferedRecords = 1000 } = {}) {
+  constructor({ auditService = null, prisma = null, repository = null, maxBufferedRecords = 1000 } = {}) {
     this.auditService = auditService;
+    this.prisma = prisma;
+    this.repository = repository ?? (prisma ? new RecoveryFeedbackRepository(prisma) : null);
     this.maxBufferedRecords = maxBufferedRecords;
     this.buffer = [];
     this.dedupIndex = new Map();
@@ -365,6 +368,10 @@ export class RecoveryFeedbackService {
   recordFeedback(params, { overwrite = false } = {}) {
     const record = this.createFeedbackRecord(params);
     const dedupKey = this.buildDeduplicationKey(record);
+
+    if (this.repository) {
+      return this.repository.createIdempotent(record, overwrite).then(() => record);
+    }
 
     if (this.dedupIndex.has(dedupKey) && !overwrite) {
       return this.dedupIndex.get(dedupKey);
@@ -397,6 +404,12 @@ export class RecoveryFeedbackService {
   }
 
   getRecentFeedback({ limit = 50, filter = null } = {}) {
+    if (this.repository) {
+      return this.repository.findMany({ orderBy: { feedbackTimestamp: 'desc' }, take: limit }).then((records) => {
+        const filtered = typeof filter === 'function' ? records.filter(filter) : records;
+        return filtered.reverse();
+      });
+    }
     let records = [...this.buffer];
     if (typeof filter === 'function') {
       records = records.filter(filter);
@@ -405,14 +418,17 @@ export class RecoveryFeedbackService {
   }
 
   getFeedbackById(feedbackId) {
+    if (this.repository) return this.repository.findByFeedbackId(feedbackId);
     return this.buffer.find((record) => record.feedback_id === feedbackId) ?? null;
   }
 
   getFeedbackForTransaction(transactionId) {
+    if (this.repository) return this.repository.findByTransactionId(transactionId);
     return this.buffer.filter((record) => record.correlation.transaction_id === transactionId);
   }
 
   getFeedbackCount() {
+    if (this.repository) return this.repository.findMany({}).then((records) => records.length);
     return this.buffer.length;
   }
 

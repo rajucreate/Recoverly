@@ -37,7 +37,7 @@ export class TransactionController {
       try {
         const action = result.recoveryAction;
         const attempt = result.attempt;
-        this.feedbackService.recordFeedback({
+        await this.feedbackService.recordFeedback({
           transactionId: req.params.transactionId,
           attemptId: action.attemptId,
           recoveryActionId: action.id,
