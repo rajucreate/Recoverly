@@ -18,20 +18,20 @@ export class PostgresRecoveryJobQueue {
     );
   }
 
-  acknowledge(jobId) {
-    return this.repository.updateStatus(jobId, RecoveryJobStatus.PROCESSING, {
-      status: RecoveryJobStatus.SUCCEEDED,
+  acknowledge(jobId, claimVersion = null) {
+    return this.repository.updateStatus(jobId, RecoveryJobStatus.PROCESSING, RecoveryJobStatus.SUCCEEDED, {
       completedAt: new Date(),
       leaseUntil: null
-    });
+    }, claimVersion);
   }
 
-  fail(jobId, error) {
-    return this.repository.updateStatus(jobId, RecoveryJobStatus.PROCESSING, {
-      status: RecoveryJobStatus.FAILED,
+  fail(jobId, error, claimVersion = null) {
+    return this.repository.updateStatus(jobId, RecoveryJobStatus.PROCESSING, RecoveryJobStatus.FAILED, {
       completedAt: new Date(),
       leaseUntil: null,
-      lastError: error instanceof Error ? error.message : String(error)
-    });
+      lastError: error instanceof Error ? error.message : String(error),
+      lastFailureCategory: error?.category ?? null,
+      lastFailureReason: error instanceof Error ? error.message : String(error)
+    }, claimVersion);
   }
 }

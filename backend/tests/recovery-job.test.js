@@ -5,6 +5,11 @@ import { PostgresRecoveryJobQueue } from '../src/queue/postgres-recovery-job-que
 import { RecoveryWorker } from '../src/workers/recovery-worker.js';
 import { RecoveryExecutionService } from '../src/services/recovery-execution-service.js';
 import { RecoveryActionType } from '../src/enums/recovery-action.js';
+import { canTransitionRecoveryJob } from '../src/services/recovery-job-state-machine.js';
+import { isRetryable } from '../src/services/recovery-retry-policy.js';
+import { calculateRetryDelay } from '../src/services/recovery-backoff.js';
+import { ProviderErrorCategory } from '../src/providers/provider-errors.js';
+import { RecoveryJobAttemptRepository } from '../src/repositories/recovery-job-attempt-repository.js';
 
 const transactionId = 'c4c23c30-99e8-4d89-9e12-5a3cbd7c740a';
 const actionId = 'a4c23c30-99e8-4d89-9e12-5a3cbd7c740a';
@@ -20,6 +25,7 @@ function makeJob(overrides = {}) {
     request: { transactionId, recoveryActionId: actionId, paymentMethod: 'UPI', providerRequest: { testDirective: 'SUCCESS' }, idempotencyKey: `recovery:${actionId}` },
     status: RecoveryJobStatus.QUEUED,
     attemptCount: 0,
+    claimVersion: 0,
     availableAt: new Date('2026-01-01T00:00:00.000Z'),
     startedAt: null,
     completedAt: null,
@@ -110,6 +116,9 @@ describe('PostgresRecoveryJobQueue', () => {
         findUnique: jest.fn(async () => job),
         updateMany: jest.fn(async () => ({ count: 1 }))
       },
+      recoveryJobAttempt: {
+        create: jest.fn(async ({ data }) => ({ id: 'ja4c23c30-99e8-4d89-9e12-5a3cbd7c740a', ...data }))
+      },
       $transaction: jest.fn(async (work) => work(prisma))
     };
     const queue = new PostgresRecoveryJobQueue(prisma);
@@ -117,8 +126,19 @@ describe('PostgresRecoveryJobQueue', () => {
     await expect(queue.claimNext('worker-1')).resolves.toMatchObject({ jobId: job.jobId, workerId: 'worker-1' });
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
     expect(prisma.$queryRaw.mock.calls[0][0].join(' ')).toContain('FOR UPDATE SKIP LOCKED');
+    expect(prisma.recoveryJobAttempt.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ attemptNumber: job.attemptCount, claimVersion: job.claimVersion, workerId: 'worker-1' })
+    }));
     await expect(queue.acknowledge(job.jobId)).resolves.toEqual({ count: 1 });
     await expect(queue.fail(job.jobId, new Error('provider failed'))).resolves.toEqual({ count: 1 });
+  });
+
+  test('accepts completion only for the current claim version', async () => {
+    const prisma = { recoveryJobAttempt: { updateMany: jest.fn(async ({ where }) => ({ count: where.claimVersion === 2 ? 1 : 0 })) } };
+    const repository = new RecoveryJobAttemptRepository(prisma);
+
+    await expect(repository.updateCompleted('attempt-1', 1, { status: 'SUCCEEDED' })).resolves.toEqual({ count: 0 });
+    await expect(repository.updateCompleted('attempt-1', 2, { status: 'SUCCEEDED' })).resolves.toEqual({ count: 1 });
   });
 });
 
@@ -137,7 +157,7 @@ describe('RecoveryWorker', () => {
     const worker = new RecoveryWorker(queue, executionService, feedbackService, { workerId: 'worker-1' });
 
     await expect(worker.processNext()).resolves.toBe(result);
-    expect(queue.acknowledge).toHaveBeenCalledWith(job.jobId);
+    expect(queue.acknowledge).toHaveBeenCalledWith(job.jobId, job.claimVersion);
     expect(feedbackService.recordFeedback).toHaveBeenCalled();
   });
 
@@ -148,7 +168,7 @@ describe('RecoveryWorker', () => {
     const worker = new RecoveryWorker(queue, { executeQueuedJob: jest.fn(async () => { throw error; }) }, null);
 
     await expect(worker.processNext()).resolves.toBeNull();
-    expect(queue.fail).toHaveBeenCalledWith(job.jobId, error);
+    expect(queue.fail).toHaveBeenCalledWith(job.jobId, error, job.claimVersion);
     expect(queue.acknowledge).not.toHaveBeenCalled();
   });
 
@@ -161,7 +181,7 @@ describe('RecoveryWorker', () => {
     const worker = new RecoveryWorker(queue, executionService, feedbackService, { workerId: 'worker-1' });
 
     await expect(worker.processNext()).resolves.toBe(result);
-    expect(queue.fail).toHaveBeenCalledWith(job.jobId, expect.objectContaining({ code: 'PROVIDER_EXECUTION_FAILED', message: 'Card declined' }));
+    expect(queue.fail).toHaveBeenCalledWith(job.jobId, expect.objectContaining({ code: 'PROVIDER_EXECUTION_FAILED', message: 'Card declined' }), job.claimVersion);
     expect(queue.acknowledge).not.toHaveBeenCalled();
     expect(feedbackService.recordFeedback).toHaveBeenCalled();
   });
@@ -180,5 +200,39 @@ describe('RecoveryExecutionService async boundary', () => {
     expect(provider.executePayment).toHaveBeenCalledWith(expect.objectContaining({ paymentMethod: 'UPI' }));
     expect(callOrder).toEqual(['provider', 'persistence']);
     expect(repository.executeInTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('RecoveryJob reliability primitives', () => {
+  test('allows only the defined job state transitions', () => {
+    expect(canTransitionRecoveryJob('QUEUED', 'PROCESSING')).toBe(true);
+    expect(canTransitionRecoveryJob('PROCESSING', 'RETRY_PENDING')).toBe(true);
+    expect(canTransitionRecoveryJob('RETRY_PENDING', 'DEAD_LETTER')).toBe(true);
+    expect(canTransitionRecoveryJob('SUCCEEDED', 'QUEUED')).toBe(false);
+    expect(canTransitionRecoveryJob('PROCESSING', 'QUEUED')).toBe(false);
+  });
+
+  test.each([
+    [ProviderErrorCategory.TIMEOUT, true],
+    [ProviderErrorCategory.NETWORK_ERROR, true],
+    [ProviderErrorCategory.RATE_LIMITED, true],
+    [ProviderErrorCategory.PROVIDER_UNAVAILABLE, true],
+    [ProviderErrorCategory.PROVIDER_DECLINED, false],
+    [ProviderErrorCategory.PAYMENT_METHOD_ERROR, false],
+    [ProviderErrorCategory.CUSTOMER_ACTION_REQUIRED, false],
+    [ProviderErrorCategory.INVALID_REQUEST, false],
+    [ProviderErrorCategory.AUTHENTICATION_FAILURE, false],
+    [ProviderErrorCategory.UNKNOWN_PROVIDER_ERROR, false],
+    [ProviderErrorCategory.LIVE_EXECUTION_DISABLED, false]
+  ])('classifies %s as retryable=%s', (category, expected) => {
+    expect(isRetryable(category)).toBe(expected);
+  });
+
+  test('calculates bounded exponential backoff with deterministic jitter', () => {
+    expect(calculateRetryDelay(1, { baseDelayMs: 100, maxDelayMs: 500, jitterRatio: 0, random: () => 0.5 })).toBe(100);
+    expect(calculateRetryDelay(2, { baseDelayMs: 100, maxDelayMs: 500, jitterRatio: 0, random: () => 0.5 })).toBe(200);
+    expect(calculateRetryDelay(10, { baseDelayMs: 100, maxDelayMs: 500, jitterRatio: 0, random: () => 0.5 })).toBe(500);
+    expect(calculateRetryDelay(2, { baseDelayMs: 100, maxDelayMs: 500, jitterRatio: 0.2, random: () => 0 })).toBe(160);
+    expect(calculateRetryDelay(2, { baseDelayMs: 100, maxDelayMs: 500, jitterRatio: 0.2, random: () => 1 })).toBe(240);
   });
 });

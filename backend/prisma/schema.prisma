@@ -71,22 +71,52 @@ model RecoveryJob {
   request          Json
   status           RecoveryJobStatus @default(QUEUED)
   attemptCount     Int               @default(0)
+  maxAttempts      Int               @default(3)
+  claimVersion     Int               @default(0)
   availableAt      DateTime          @default(now())
   startedAt        DateTime?
   completedAt      DateTime?
   leaseUntil       DateTime?
   lastError        String?
+  lastFailureCategory String?        @db.VarChar(64)
+  lastFailureReason String?
+  deadLetteredAt   DateTime?
   idempotencyKey   String            @unique @db.VarChar(255)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   transaction      Transaction       @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   recoveryAction   RecoveryAction    @relation(fields: [recoveryActionId], references: [id], onDelete: Cascade)
   triggerAttempt   PaymentAttempt    @relation(fields: [triggerAttemptId], references: [id], onDelete: Cascade)
+  attempts         RecoveryJobAttempt[]
 
   @@unique([recoveryActionId])
   @@index([status, availableAt])
   @@index([leaseUntil])
   @@index([transactionId])
+}
+
+model RecoveryJobAttempt {
+  id                     String                   @id @default(uuid()) @db.Uuid
+  recoveryJobId          String                   @db.Uuid
+  attemptNumber          Int
+  workerId               String?                  @db.VarChar(255)
+  claimVersion           Int
+  startedAt              DateTime                 @default(now())
+  completedAt            DateTime?
+  providerId             String?                  @db.VarChar(64)
+  providerIdempotencyKey String                   @db.VarChar(255)
+  providerRequestId      String?                  @db.VarChar(255)
+  providerPaymentId      String?                  @db.VarChar(255)
+  status                 RecoveryJobAttemptStatus @default(PROCESSING)
+  failureCategory        String?                  @db.VarChar(64)
+  failureReason          String?
+  createdAt              DateTime                 @default(now())
+  recoveryJob            RecoveryJob              @relation(fields: [recoveryJobId], references: [id], onDelete: Cascade)
+
+  @@unique([recoveryJobId, attemptNumber])
+  @@index([recoveryJobId])
+  @@index([providerIdempotencyKey])
+  @@index([claimVersion])
 }
 
 model RecoveryDecisionAudit {
@@ -207,6 +237,14 @@ enum RecoveryFeedbackOutcome {
 
 enum RecoveryJobStatus {
   QUEUED
+  PROCESSING
+  RETRY_PENDING
+  SUCCEEDED
+  FAILED
+  DEAD_LETTER
+}
+
+enum RecoveryJobAttemptStatus {
   PROCESSING
   SUCCEEDED
   FAILED

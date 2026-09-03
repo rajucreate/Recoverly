@@ -1,6 +1,8 @@
 export const RecoveryJobStatus = Object.freeze({
   QUEUED: 'QUEUED',
   PROCESSING: 'PROCESSING',
+  RETRY_PENDING: 'RETRY_PENDING',
   SUCCEEDED: 'SUCCEEDED',
-  FAILED: 'FAILED'
+  FAILED: 'FAILED',
+  DEAD_LETTER: 'DEAD_LETTER'
 });

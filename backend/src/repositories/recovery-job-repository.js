@@ -1,4 +1,6 @@
 import { RecoveryJobStatus } from '../enums/recovery-job-status.js';
+import { RecoveryJobAttemptStatus } from '../enums/recovery-job-attempt-status.js';
+import { assertRecoveryJobTransition } from '../services/recovery-job-state-machine.js';
 
 export class RecoveryJobRepository {
   constructor(prisma) { this.prisma = prisma; }
@@ -16,10 +18,11 @@ export class RecoveryJobRepository {
     return this.prisma.recoveryJob.findUnique({ where: { recoveryActionId } });
   }
 
-  updateStatus(jobId, fromStatus, data) {
+  updateStatus(jobId, fromStatus, toStatus, data = {}, claimVersion = null) {
+    assertRecoveryJobTransition(fromStatus, toStatus);
     return this.prisma.recoveryJob.updateMany({
-      where: { jobId, status: fromStatus },
-      data
+      where: { jobId, status: fromStatus, ...(claimVersion === null ? {} : { claimVersion }) },
+      data: { ...data, status: toStatus }
     });
   }
 
@@ -39,6 +42,7 @@ export class RecoveryJobRepository {
       UPDATE "RecoveryJob"
       SET "status" = ${RecoveryJobStatus.PROCESSING},
           "attemptCount" = "attemptCount" + 1,
+          "claimVersion" = "claimVersion" + 1,
           "startedAt" = CURRENT_TIMESTAMP,
           "leaseUntil" = ${leaseUntil},
           "lastError" = NULL,
@@ -46,7 +50,18 @@ export class RecoveryJobRepository {
       WHERE "id" = ${jobs[0].id}
       RETURNING *
     `;
-    return job ? { ...job, workerId } : null;
+    if (!job) return null;
+    const attempt = await this.prisma.recoveryJobAttempt.create({
+      data: {
+        recoveryJobId: job.id,
+        attemptNumber: job.attemptCount,
+        workerId,
+        claimVersion: job.claimVersion,
+        providerIdempotencyKey: job.request.idempotencyKey ?? `recovery:${job.recoveryActionId}`,
+        status: RecoveryJobAttemptStatus.PROCESSING
+      }
+    });
+    return { ...job, workerId, executionAttemptId: attempt.id };
   }
 
   findById(jobId) { return this.prisma.recoveryJob.findUnique({ where: { jobId } }); }

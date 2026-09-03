@@ -3,6 +3,8 @@ import { BusinessRuleError, NotFoundError } from '../errors/app-error.js';
 import { RecoveryActionRepository } from '../repositories/recovery-action-repository.js';
 import { TransactionStatus } from '../enums/transaction-status.js';
 import { adaptPaymentProvider, normalizeProviderResponse } from '../providers/payment-provider.js';
+import { RecoveryJobAttemptStatus } from '../enums/recovery-job-attempt-status.js';
+import { RecoveryJobAttemptRepository } from '../repositories/recovery-job-attempt-repository.js';
 
 const ATTEMPT_ACTIONS = new Set(['RETRY', 'ALTERNATE_METHOD']);
 
@@ -71,8 +73,21 @@ export class RecoveryExecutionService {
     return this.persistProviderResult({
       transactionId: job.transactionId,
       recoveryActionId: job.recoveryActionId,
-      paymentMethod: job.request.paymentMethod
+      paymentMethod: job.request.paymentMethod,
+      executionAttemptId: job.executionAttemptId,
+      claimVersion: job.claimVersion
     }, providerResult);
+  }
+
+  async markQueuedAttemptFailed(job, error) {
+    if (!job.executionAttemptId) return;
+    await this.transactionRepository.executeInTransaction(async (transactionRepository) => {
+      await new RecoveryJobAttemptRepository(transactionRepository.prisma).updateFailed(
+        job.executionAttemptId,
+        job.claimVersion,
+        error instanceof Error ? error.message : String(error)
+      );
+    });
   }
 
   async persistProviderResult(execution, providerResult) {
@@ -100,6 +115,24 @@ export class RecoveryExecutionService {
       await transactionRepository.updateStatus(transactionId, providerResult.outcome === 'SUCCESS' ? TransactionStatus.SUCCESS : TransactionStatus.FAILED);
       const completedStatus = providerResult.outcome === 'SUCCESS' ? 'SUCCESS' : 'FAILED';
       await this.transitionAction(recoveryActionRepository, recoveryActionId, 'RECOMMENDED', completedStatus);
+      if (execution.executionAttemptId) {
+        const attemptUpdate = await new RecoveryJobAttemptRepository(transactionRepository.prisma).updateCompleted(
+          execution.executionAttemptId,
+          execution.claimVersion,
+          {
+            status: providerResult.outcome === 'SUCCESS' ? RecoveryJobAttemptStatus.SUCCEEDED : RecoveryJobAttemptStatus.FAILED,
+            completedAt: new Date(),
+            providerId: providerResult.providerId,
+            providerRequestId: providerResult.providerRequestId,
+            providerPaymentId: providerResult.providerPaymentId,
+            failureCategory: providerResult.failureCategory,
+            failureReason: providerResult.failureReason
+          }
+        );
+        if (attemptUpdate.count !== 1) {
+          throw new BusinessRuleError('Recovery job attempt claim is no longer current', { recoveryActionId, claimVersion: execution.claimVersion });
+        }
+      }
       const completedAction = await recoveryActionRepository.findByIdForTransaction(recoveryActionId, transactionId);
       return { attempt: toPaymentAttemptResponse(attempt), recoveryAction: toRecoveryActionResponse(completedAction) };
     });

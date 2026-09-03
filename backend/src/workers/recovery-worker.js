@@ -31,14 +31,21 @@ export class RecoveryWorker {
         if (result.attempt?.status === 'FAILED') {
           const error = new Error(result.attempt.failureReason ?? 'Provider execution failed');
           error.code = 'PROVIDER_EXECUTION_FAILED';
-          await this.queue.fail(job.jobId, error);
+          error.category = result.attempt.failureCategory ?? null;
+          if (job.claimVersion === undefined) await this.queue.fail(job.jobId, error);
+          else await this.queue.fail(job.jobId, error, job.claimVersion);
         } else {
-          await this.queue.acknowledge(job.jobId);
+          if (job.claimVersion === undefined) await this.queue.acknowledge(job.jobId);
+          else await this.queue.acknowledge(job.jobId, job.claimVersion);
         }
         await this.recordFeedback(job, result);
         return result;
       } catch (error) {
-        await this.queue.fail(job.jobId, error);
+        if (this.executionService.markQueuedAttemptFailed) {
+          try { await this.executionService.markQueuedAttemptFailed(job, error); } catch { /* Preserve the job failure path. */ }
+        }
+        if (job.claimVersion === undefined) await this.queue.fail(job.jobId, error);
+        else await this.queue.fail(job.jobId, error, job.claimVersion);
         return null;
       }
     } finally {
