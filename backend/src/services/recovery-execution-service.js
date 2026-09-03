@@ -17,7 +17,7 @@ export class RecoveryExecutionService {
   }
 
   async execute(transactionId, data) {
-    return this.transactionRepository.executeInTransaction(async (transactionRepository) => {
+    const prepared = await this.transactionRepository.executeInTransaction(async (transactionRepository) => {
       const transaction = await transactionRepository.findByIdForAttempt(transactionId);
       if (!transaction) throw new NotFoundError('Transaction', transactionId);
       if (transaction.status !== TransactionStatus.FAILED) {
@@ -31,26 +31,64 @@ export class RecoveryExecutionService {
         throw new BusinessRuleError('Recovery action has already been executed', { recoveryActionId: action.id, status: action.status });
       }
 
-      await this.transitionAction(recoveryActionRepository, action.id, 'RECOMMENDED', 'EXECUTED');
-
       if (!ATTEMPT_ACTIONS.has(action.actionType)) {
+        await this.transitionAction(recoveryActionRepository, action.id, 'RECOMMENDED', 'EXECUTED');
         const executedAction = await recoveryActionRepository.findByIdForTransaction(action.id, transactionId);
         return { attempt: null, recoveryAction: toRecoveryActionResponse(executedAction) };
       }
 
       const paymentMethod = this.resolvePaymentMethod(action, data.paymentMethod);
-      const providerRequest = {
-        transactionId,
-        recoveryActionId: action.id,
+      return {
+        transaction,
+        action,
         paymentMethod,
-        ...(data.providerRequest ? { providerRequest: data.providerRequest } : {}),
-        idempotencyKey: `recovery:${action.id}`
+        providerRequest: {
+          transactionId,
+          recoveryActionId: action.id,
+          paymentMethod,
+          ...(data.providerRequest ? { providerRequest: data.providerRequest } : {}),
+          idempotencyKey: `recovery:${action.id}`
+        }
       };
-      const providerResult = normalizeProviderResponse(
-        await this.paymentProvider.executePayment(providerRequest),
-        this.paymentProvider.providerId,
-        providerRequest
-      );
+    });
+
+    if (prepared.attempt === null) return prepared;
+
+    const providerResult = normalizeProviderResponse(
+      await this.paymentProvider.executePayment(prepared.providerRequest),
+      this.paymentProvider.providerId,
+      prepared.providerRequest
+    );
+    return this.persistProviderResult(prepared, providerResult);
+  }
+
+  async executeQueuedJob(job) {
+    const providerResult = normalizeProviderResponse(
+      await this.paymentProvider.executePayment(job.request),
+      this.paymentProvider.providerId,
+      job.request
+    );
+    return this.persistProviderResult({
+      transactionId: job.transactionId,
+      recoveryActionId: job.recoveryActionId,
+      paymentMethod: job.request.paymentMethod
+    }, providerResult);
+  }
+
+  async persistProviderResult(execution, providerResult) {
+    const transactionId = execution.transactionId ?? execution.providerRequest?.transactionId;
+    const recoveryActionId = execution.recoveryActionId ?? execution.providerRequest?.recoveryActionId;
+    const paymentMethod = execution.paymentMethod ?? execution.providerRequest?.paymentMethod;
+    return this.transactionRepository.executeInTransaction(async (transactionRepository) => {
+      const transaction = await transactionRepository.findByIdForAttempt(transactionId);
+      if (!transaction) throw new NotFoundError('Transaction', transactionId);
+      const recoveryActionRepository = new RecoveryActionRepository(transactionRepository.prisma);
+      const action = await recoveryActionRepository.findByIdForTransaction(recoveryActionId, transactionId);
+      if (!action) throw new NotFoundError('RecoveryAction', recoveryActionId);
+      if (action.status !== 'RECOMMENDED') {
+        throw new BusinessRuleError('Recovery action has already been executed', { recoveryActionId, status: action.status });
+      }
+
       const attempt = await transactionRepository.createPaymentAttempt({
         transactionId,
         paymentMethod,
@@ -61,8 +99,8 @@ export class RecoveryExecutionService {
       });
       await transactionRepository.updateStatus(transactionId, providerResult.outcome === 'SUCCESS' ? TransactionStatus.SUCCESS : TransactionStatus.FAILED);
       const completedStatus = providerResult.outcome === 'SUCCESS' ? 'SUCCESS' : 'FAILED';
-      await this.transitionAction(recoveryActionRepository, action.id, 'EXECUTED', completedStatus);
-      const completedAction = await recoveryActionRepository.findByIdForTransaction(action.id, transactionId);
+      await this.transitionAction(recoveryActionRepository, recoveryActionId, 'RECOMMENDED', completedStatus);
+      const completedAction = await recoveryActionRepository.findByIdForTransaction(recoveryActionId, transactionId);
       return { attempt: toPaymentAttemptResponse(attempt), recoveryAction: toRecoveryActionResponse(completedAction) };
     });
   }

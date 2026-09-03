@@ -19,6 +19,7 @@ model Transaction {
   recoveryActions RecoveryAction[]
   decisionAudits  RecoveryDecisionAudit[]
   feedbackRecords RecoveryFeedback[]
+  recoveryJobs    RecoveryJob[]
 
   @@index([customerId])
 }
@@ -37,6 +38,7 @@ model PaymentAttempt {
   decisionAudits  RecoveryDecisionAudit[]
   feedbackTriggers RecoveryFeedback[] @relation("FeedbackTriggerAttempt")
   feedbackExecutions RecoveryFeedback[] @relation("FeedbackExecutionAttempt")
+  recoveryJobs     RecoveryJob[]
 
   @@index([transactionId])
   @@unique([transactionId, attemptNumber])
@@ -54,9 +56,37 @@ model RecoveryAction {
   attempt       PaymentAttempt       @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   decisionAudits RecoveryDecisionAudit[]
   feedbackRecords RecoveryFeedback[]
+  recoveryJobs    RecoveryJob[]
 
   @@index([transactionId])
   @@unique([attemptId])
+}
+
+model RecoveryJob {
+  id               String            @id @default(uuid()) @db.Uuid
+  jobId            String            @unique @db.VarChar(255)
+  transactionId    String            @db.Uuid
+  recoveryActionId String            @db.Uuid
+  triggerAttemptId String            @db.Uuid
+  request          Json
+  status           RecoveryJobStatus @default(QUEUED)
+  attemptCount     Int               @default(0)
+  availableAt      DateTime          @default(now())
+  startedAt        DateTime?
+  completedAt      DateTime?
+  leaseUntil       DateTime?
+  lastError        String?
+  idempotencyKey   String            @unique @db.VarChar(255)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  transaction      Transaction       @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  recoveryAction   RecoveryAction    @relation(fields: [recoveryActionId], references: [id], onDelete: Cascade)
+  triggerAttempt   PaymentAttempt    @relation(fields: [triggerAttemptId], references: [id], onDelete: Cascade)
+
+  @@unique([recoveryActionId])
+  @@index([status, availableAt])
+  @@index([leaseUntil])
+  @@index([transactionId])
 }
 
 model RecoveryDecisionAudit {
@@ -173,4 +203,11 @@ enum RecoveryFeedbackOutcome {
   SUCCESS
   FAILED
   EXECUTED
+}
+
+enum RecoveryJobStatus {
+  QUEUED
+  PROCESSING
+  SUCCEEDED
+  FAILED
 }

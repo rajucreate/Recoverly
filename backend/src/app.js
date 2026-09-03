@@ -16,6 +16,11 @@ import { RecoveryFeedbackService } from './intelligence/recovery-feedback-servic
 import { RecoveryAnalyticsService } from './intelligence/recovery-analytics-service.js';
 import { AnalyticsController } from './controllers/analytics-controller.js';
 import { createAnalyticsRouter } from './routes/analytics-routes.js';
+import { RecoveryJobService } from './services/recovery-job-service.js';
+import { PostgresRecoveryJobQueue } from './queue/postgres-recovery-job-queue.js';
+import { RecoveryWorker } from './workers/recovery-worker.js';
+import { RecoveryJobController } from './controllers/recovery-job-controller.js';
+import { createRecoveryJobRouter } from './routes/recovery-job-routes.js';
 
 export function createApp({
   transactionService,
@@ -25,7 +30,10 @@ export function createApp({
   decisionPolicy,
   auditService,
   feedbackService,
-  analyticsService
+  analyticsService,
+  recoveryJobService,
+  recoveryJobQueue,
+  recoveryWorker
 } = {}) {
   const useDurableDefaults = !transactionService && !recoveryExecutionService && !auditService && !feedbackService;
   const audit = auditService ?? new RecoveryDecisionAuditService({ prisma: useDurableDefaults ? prisma : null });
@@ -53,6 +61,9 @@ export function createApp({
     feedbackService: feedback,
     auditService: audit
   });
+  const jobService = recoveryJobService ?? new RecoveryJobService(new TransactionRepository(prisma));
+  const jobQueue = recoveryJobQueue ?? new PostgresRecoveryJobQueue(prisma);
+  const worker = recoveryWorker ?? new RecoveryWorker(jobQueue, executionService, feedback);
   const app = express();
   app.disable('x-powered-by');
   app.use((_req, res, next) => {
@@ -69,7 +80,9 @@ export function createApp({
   app.use(express.json({ limit: '100kb' }));
   app.use('/api/transactions', createTransactionRouter(new TransactionController(service, executionService, feedback, providerRequestAdapter)));
   app.use('/api/analytics', createAnalyticsRouter(new AnalyticsController(analytics)));
+  app.use('/api', createRecoveryJobRouter(new RecoveryJobController(jobService, jobQueue, providerRequestAdapter)));
   app.use(notFoundHandler);
   app.use(errorHandler);
+  app.locals.recoveryWorker = worker;
   return app;
 }
