@@ -1,8 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Prisma } from '@prisma/client';
 import { RecoveryActionType } from '../enums/recovery-action.js';
 import { DECISION_SOURCES, FALLBACK_REASONS } from './recovery-decision-policy.js';
+import { ValidationError, NotFoundError } from '../errors/app-error.js';
 
 export const DEFAULT_BENCHMARK_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -38,6 +40,12 @@ function calculateMedian(values) {
   return (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+function toDecimal(value) {
+  if (value === null || value === undefined) return new Prisma.Decimal(0);
+  if (value instanceof Prisma.Decimal) return value;
+  return new Prisma.Decimal(value.toString());
+}
+
 export class RecoveryAnalyticsService {
   constructor({
     prisma = null,
@@ -53,14 +61,36 @@ export class RecoveryAnalyticsService {
     this.cachedBenchmark = undefined;
   }
 
-  async getOperationalMetrics() {
+  async getOperationalMetrics(options = {}) {
     if (!this.prisma) {
       return this._getEmptyOperationalMetrics();
     }
 
+    const transactionIds = Array.isArray(options) ? options : (options?.transactionIds ?? null);
+    const hasBatchFilter = Array.isArray(transactionIds) && transactionIds.length > 0;
+
+    let currencies = new Set();
+    if (hasBatchFilter) {
+      const existingTxns = await this.prisma.transaction.findMany({
+        where: { id: { in: transactionIds } },
+        select: { id: true, currency: true }
+      });
+      const foundMap = new Set((existingTxns || []).map((t) => t.id));
+      const missingId = transactionIds.find((id) => !foundMap.has(id));
+      if (missingId) {
+        throw new NotFoundError('Transaction', missingId);
+      }
+      currencies = new Set((existingTxns || []).map((t) => t.currency).filter(Boolean));
+    }
+
+    const actionWhere = hasBatchFilter
+      ? { transactionId: { in: transactionIds } }
+      : {};
+
     const [executedPaymentActions, allRecoveryActions, failedTransactions] = await Promise.all([
       this.prisma.recoveryAction.findMany({
         where: {
+          ...actionWhere,
           actionType: { in: [RecoveryActionType.RETRY, RecoveryActionType.ALTERNATE_METHOD] },
           status: { in: ['SUCCESS', 'FAILED'] }
         },
@@ -74,20 +104,26 @@ export class RecoveryAnalyticsService {
         }
       }),
       this.prisma.recoveryAction.findMany({
+        where: actionWhere,
         select: {
           id: true,
           actionType: true,
-          status: true
+          status: true,
+          transactionId: true
         }
       }),
       this.prisma.transaction.findMany({
         where: {
+          ...(hasBatchFilter ? { id: { in: transactionIds } } : {}),
           paymentAttempts: {
             some: { status: 'FAILED' }
           }
         },
         select: {
           id: true,
+          amount: true,
+          currency: true,
+          status: true,
           paymentAttempts: {
             select: {
               attemptNumber: true,
@@ -96,12 +132,36 @@ export class RecoveryAnalyticsService {
           },
           recoveryActions: {
             select: {
+              id: true,
+              actionType: true,
+              status: true
+            }
+          },
+          recoveryJobs: {
+            select: {
+              id: true,
               status: true
             }
           }
         }
       })
     ]);
+
+    if (!hasBatchFilter) {
+      currencies = new Set(failedTransactions.map((t) => t.currency).filter(Boolean));
+    }
+
+    const hasMixedCurrencies = currencies.size > 1;
+
+    if (hasBatchFilter && hasMixedCurrencies) {
+      throw new ValidationError('Request validation failed', {
+        currency: 'Mixed currencies cannot be aggregated in a single monetary recovery summary'
+      });
+    }
+
+    const batchCurrency = currencies.size === 1
+      ? Array.from(currencies)[0]
+      : (failedTransactions.length > 0 ? failedTransactions[0].currency : null);
 
     // A. Action-level recovery execution rate
     const actionSuccessCount = executedPaymentActions.filter((a) => a.status === 'SUCCESS').length;
@@ -113,21 +173,137 @@ export class RecoveryAnalyticsService {
 
     // B. Transaction-level recovery resolution rate
     const failedTransactionCount = failedTransactions.length;
-    const recoveredTransactionCount = failedTransactions.filter((txn) => {
-      const hasSubsequentSuccessAttempt = txn.paymentAttempts.some(
+    const isTxnRecovered = (txn) => {
+      const hasSubsequentSuccessAttempt = (txn.paymentAttempts || []).some(
         (att) => att.status === 'SUCCESS' && att.attemptNumber > 1
       );
-      const hasSuccessfulRecoveryAction = txn.recoveryActions.some(
-        (act) => act.status === 'SUCCESS'
-      );
-      return hasSubsequentSuccessAttempt || hasSuccessfulRecoveryAction;
-    }).length;
+      return hasSubsequentSuccessAttempt;
+    };
+
+    // Preserve the legacy operational resolution metric. Monetary recovery below is
+    // deliberately stricter and uses only isTxnRecovered.
+    const isOperationallyResolved = (txn) => isTxnRecovered(txn) ||
+      (txn.recoveryActions || []).some((action) => action.status === 'SUCCESS');
+
+    const recoveredTransactions = failedTransactions.filter(isOperationallyResolved);
+    const recoveredTransactionCount = recoveredTransactions.length;
 
     const transactionRecoveryRate = failedTransactionCount > 0
       ? round(recoveredTransactionCount / failedTransactionCount)
       : null;
 
-    // C. Recovery rate by failure category
+    // C. Monetary metrics calculation with Decimal precision
+    let revenueAtRiskDec = new Prisma.Decimal(0);
+    let revenueRecoveredDec = new Prisma.Decimal(0);
+
+    let successfulRecoveries = 0;
+    let failedRecoveries = 0;
+    let stoppedRecoveries = 0;
+    let pendingRecoveries = 0;
+
+    for (const txn of failedTransactions) {
+      const amountDec = toDecimal(txn.amount);
+      revenueAtRiskDec = revenueAtRiskDec.add(amountDec);
+
+      if (isTxnRecovered(txn)) {
+        revenueRecoveredDec = revenueRecoveredDec.add(amountDec);
+        successfulRecoveries += 1;
+      } else {
+        const actions = txn.recoveryActions || [];
+        const jobs = txn.recoveryJobs || [];
+
+        const hasPendingAction = actions.some((a) => a.status === 'RECOMMENDED');
+        const hasActiveJob = jobs.some((j) => ['QUEUED', 'PROCESSING', 'RETRY_PENDING'].includes(j.status));
+        const hasStoppedAction = actions.some((a) => ['CUSTOMER_ACTION', 'ESCALATE'].includes(a.actionType) && a.status === 'EXECUTED');
+        const hasDeadLetterJob = jobs.some((j) => j.status === 'DEAD_LETTER');
+        const hasFailedPaymentAction = actions.some((a) => ['RETRY', 'ALTERNATE_METHOD'].includes(a.actionType) && a.status === 'FAILED');
+
+        if (hasStoppedAction || hasDeadLetterJob) {
+          stoppedRecoveries += 1;
+        } else if (hasFailedPaymentAction && !hasPendingAction && !hasActiveJob) {
+          failedRecoveries += 1;
+        } else if (hasPendingAction || hasActiveJob || actions.length === 0) {
+          pendingRecoveries += 1;
+        } else {
+          stoppedRecoveries += 1;
+        }
+      }
+    }
+
+    const monetaryRecoveryRate = revenueAtRiskDec.isZero()
+      ? null
+      : round(revenueRecoveredDec.dividedBy(revenueAtRiskDec).toNumber(), 4);
+
+    // D. Per-recovery-action performance breakdown
+    const actionTypes = [
+      RecoveryActionType.RETRY,
+      RecoveryActionType.ALTERNATE_METHOD,
+      RecoveryActionType.CUSTOMER_ACTION,
+      RecoveryActionType.ESCALATE
+    ];
+
+    const byAction = {};
+    for (const actionType of actionTypes) {
+      const typeActions = allRecoveryActions.filter((a) => a.actionType === actionType);
+
+      let attemptedCount = 0;
+      let successfulCount = 0;
+      let failedCount = 0;
+      let stoppedCount = 0;
+
+      if (actionType === RecoveryActionType.RETRY || actionType === RecoveryActionType.ALTERNATE_METHOD) {
+        const executed = typeActions.filter((a) => ['SUCCESS', 'FAILED'].includes(a.status));
+        attemptedCount = executed.length;
+        successfulCount = executed.filter((a) => a.status === 'SUCCESS').length;
+        failedCount = executed.filter((a) => a.status === 'FAILED').length;
+        stoppedCount = 0;
+      } else {
+        const executed = typeActions.filter((a) => a.status === 'EXECUTED');
+        attemptedCount = executed.length;
+        successfulCount = 0;
+        failedCount = 0;
+        stoppedCount = executed.length;
+      }
+
+      const actionTxns = failedTransactions.filter((txn) =>
+        (txn.recoveryActions || []).some((a) => a.actionType === actionType)
+      );
+
+      let actionRevenueAtRiskDec = new Prisma.Decimal(0);
+      let actionRevenueRecoveredDec = new Prisma.Decimal(0);
+
+      for (const txn of actionTxns) {
+        const amountDec = toDecimal(txn.amount);
+        actionRevenueAtRiskDec = actionRevenueAtRiskDec.add(amountDec);
+
+        const hasSubsequentSuccess = isTxnRecovered(txn);
+
+        if (hasSubsequentSuccess) {
+          actionRevenueRecoveredDec = actionRevenueRecoveredDec.add(amountDec);
+        }
+      }
+
+      const actionMonetaryRate = actionRevenueAtRiskDec.isZero()
+        ? null
+        : round(actionRevenueRecoveredDec.dividedBy(actionRevenueAtRiskDec).toNumber(), 4);
+
+      const actionTransactionRate = attemptedCount > 0
+        ? round(successfulCount / attemptedCount, 4)
+        : null;
+
+      byAction[actionType] = {
+        attemptedCount,
+        successfulCount,
+        failedCount,
+        stoppedCount,
+        revenueAtRisk: actionRevenueAtRiskDec.toFixed(2),
+        revenueRecovered: actionRevenueRecoveredDec.toFixed(2),
+        monetaryRecoveryRate: actionMonetaryRate,
+        transactionRecoveryRate: actionTransactionRate
+      };
+    }
+
+    // E. Recovery rate by failure category
     const byFailureCategory = {};
     for (const category of FAILURE_CATEGORIES) {
       const categoryActions = executedPaymentActions.filter(
@@ -144,7 +320,7 @@ export class RecoveryAnalyticsService {
       };
     }
 
-    // D. Recovery rate by payment method
+    // F. Recovery rate by payment method
     const byPaymentMethod = {};
     for (const method of PAYMENT_METHODS) {
       const methodActions = executedPaymentActions.filter(
@@ -161,24 +337,45 @@ export class RecoveryAnalyticsService {
       };
     }
 
-    // E. Retry success rate
+    // G. Retry success rate
     const retryActions = executedPaymentActions.filter((a) => a.actionType === RecoveryActionType.RETRY);
     const retrySuccess = retryActions.filter((a) => a.status === 'SUCCESS').length;
     const retryFailed = retryActions.filter((a) => a.status === 'FAILED').length;
     const retryTotal = retrySuccess + retryFailed;
     const retrySuccessRate = retryTotal > 0 ? round(retrySuccess / retryTotal) : null;
 
-    // F. Alternate-method success rate
+    // H. Alternate-method success rate
     const altActions = executedPaymentActions.filter((a) => a.actionType === RecoveryActionType.ALTERNATE_METHOD);
     const altSuccess = altActions.filter((a) => a.status === 'SUCCESS').length;
     const altFailed = altActions.filter((a) => a.status === 'FAILED').length;
     const altTotal = altSuccess + altFailed;
     const alternateMethodSuccessRate = altTotal > 0 ? round(altSuccess / altTotal) : null;
 
-    // G. Escalation rate
+    // I. Escalation rate
     const totalRecommendations = allRecoveryActions.length;
     const escalateCount = allRecoveryActions.filter((a) => a.actionType === RecoveryActionType.ESCALATE).length;
     const escalationRate = totalRecommendations > 0 ? round(escalateCount / totalRecommendations) : null;
+
+    const unavailableMonetaryBreakdown = Object.fromEntries(
+      Object.entries(byAction).map(([actionType, metrics]) => [actionType, {
+        ...metrics,
+        revenueAtRisk: null,
+        revenueRecovered: null,
+        monetaryRecoveryRate: null
+      }])
+    );
+
+    const monetary = {
+      currency: hasMixedCurrencies ? null : batchCurrency,
+      revenueAtRisk: hasMixedCurrencies ? null : revenueAtRiskDec.toFixed(2),
+      revenueRecovered: hasMixedCurrencies ? null : revenueRecoveredDec.toFixed(2),
+      monetaryRecoveryRate: hasMixedCurrencies ? null : monetaryRecoveryRate,
+      successfulRecoveries,
+      failedRecoveries,
+      stoppedRecoveries,
+      pendingRecoveries,
+      byAction: hasMixedCurrencies ? unavailableMonetaryBreakdown : byAction
+    };
 
     return {
       actionRecoveryRate: {
@@ -211,7 +408,8 @@ export class RecoveryAnalyticsService {
         rate: escalationRate,
         escalateCount,
         totalRecommendations
-      }
+      },
+      monetary
     };
   }
 
@@ -397,15 +595,20 @@ export class RecoveryAnalyticsService {
     return null;
   }
 
-  async getAnalyticsSummary() {
+  async getAnalyticsSummary(options = {}) {
+    const transactionIds = Array.isArray(options) ? options : (options?.transactionIds ?? null);
     const [operational, model, benchmark] = await Promise.all([
-      this.getOperationalMetrics(),
+      this.getOperationalMetrics({ transactionIds }),
       this.getModelMetrics(),
       Promise.resolve(this.getBenchmarkMetrics())
     ]);
 
     return {
       operational,
+      batch: transactionIds && transactionIds.length > 0 ? {
+        transactionIds,
+        ...operational.monetary
+      } : null,
       model,
       benchmark
     };
@@ -420,6 +623,19 @@ export class RecoveryAnalyticsService {
     for (const m of PAYMENT_METHODS) {
       emptyMethod[m] = { rate: null, successCount: 0, failedCount: 0, totalEligible: 0 };
     }
+    const emptyByAction = {};
+    for (const actionType of [RecoveryActionType.RETRY, RecoveryActionType.ALTERNATE_METHOD, RecoveryActionType.CUSTOMER_ACTION, RecoveryActionType.ESCALATE]) {
+      emptyByAction[actionType] = {
+        attemptedCount: 0,
+        successfulCount: 0,
+        failedCount: 0,
+        stoppedCount: 0,
+        revenueAtRisk: '0.00',
+        revenueRecovered: '0.00',
+        monetaryRecoveryRate: null,
+        transactionRecoveryRate: null
+      };
+    }
 
     return {
       actionRecoveryRate: { rate: null, successCount: 0, failedCount: 0, totalEligible: 0 },
@@ -428,7 +644,18 @@ export class RecoveryAnalyticsService {
       byPaymentMethod: emptyMethod,
       retrySuccessRate: { rate: null, successCount: 0, failedCount: 0, totalEligible: 0 },
       alternateMethodSuccessRate: { rate: null, successCount: 0, failedCount: 0, totalEligible: 0 },
-      escalationRate: { rate: null, escalateCount: 0, totalRecommendations: 0 }
+      escalationRate: { rate: null, escalateCount: 0, totalRecommendations: 0 },
+      monetary: {
+        currency: null,
+        revenueAtRisk: '0.00',
+        revenueRecovered: '0.00',
+        monetaryRecoveryRate: null,
+        successfulRecoveries: 0,
+        failedRecoveries: 0,
+        stoppedRecoveries: 0,
+        pendingRecoveries: 0,
+        byAction: emptyByAction
+      }
     };
   }
 }

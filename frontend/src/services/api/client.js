@@ -57,6 +57,7 @@ export function executeRecovery(transactionId, data) {
   });
 }
 
-export function getRecoveryAnalytics() {
-  return request('/analytics/recovery');
+export function getRecoveryAnalytics({ transactionIds } = {}) {
+  const ids = typeof transactionIds === 'string' ? transactionIds.trim() : '';
+  return request(`/analytics/recovery${ids ? `?transactionIds=${encodeURIComponent(ids)}` : ''}`);
 }

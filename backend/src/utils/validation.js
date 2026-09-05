@@ -20,6 +20,18 @@ export function validateUuid(value) {
   if (!UUID_PATTERN.test(value)) throw new ValidationError('Request validation failed', { transactionId: 'transactionId must be a valid UUID' });
 }
 
+export function validateTransactionIdsQuery(value) {
+  if (value === undefined) return null;
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new ValidationError('Request validation failed', { transactionIds: 'transactionIds must be a non-empty comma-separated UUID list' });
+  }
+  const ids = value.split(',').map((id) => id.trim());
+  if (ids.some((id) => !UUID_PATTERN.test(id))) {
+    throw new ValidationError('Request validation failed', { transactionIds: 'Each transactionId must be a valid UUID' });
+  }
+  return [...new Set(ids)];
+}
+
 const PAYMENT_METHODS = new Set(['UPI', 'CARD', 'NET_BANKING']);
 const OUTCOMES = new Set(['SUCCESS', 'FAILED']);
 const FAILURE_CATEGORIES = new Set(['TEMPORARY_FAILURE', 'PAYMENT_METHOD_FAILURE', 'CUSTOMER_ACTION_REQUIRED', 'UNKNOWN_FAILURE']);
