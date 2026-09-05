@@ -11,7 +11,12 @@
     "lint": "node --check src/app.js && node --check src/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:deploy": "prisma migrate deploy"
+    "prisma:deploy": "prisma migrate deploy",
+    "demo:showcase": "node scripts/showcase-recovery-batch.js",
+    "demo:showcase:reset": "node scripts/showcase-recovery-batch.js --reset",
+    "demo:showcase:cleanup": "node scripts/showcase-recovery-batch.js --cleanup",
+    "demo:showcase:report": "node scripts/showcase-recovery-batch.js --report",
+    "demo:showcase:verify": "node scripts/showcase-recovery-batch.js --verify"
   },
   "dependencies": {
     "@prisma/client": "^6.16.2",
